@@ -13,14 +13,13 @@ pub trait Rank {
     }
 }
 
-const STRIDE: usize = 256;
-
-pub struct DnaRank {
+#[derive(mem_dbg::MemSize)]
+pub struct DnaRank<const STRIDE: usize> {
     seq: PackedSeqVec,
     counts: Vec<Ranks>,
 }
 
-impl Rank for DnaRank {
+impl<const STRIDE: usize> Rank for DnaRank<STRIDE> {
     fn new(seq: &[u8]) -> Self {
         let mut counts = Vec::with_capacity(seq.len().div_ceil(STRIDE));
         let mut ranks = [0; 4];
