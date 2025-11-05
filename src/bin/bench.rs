@@ -24,8 +24,6 @@ fn bench_dna_rank<const STRIDE: usize>() {
 }
 
 fn main() {
-    bench_dna_rank::<1>();
-    bench_dna_rank::<2>();
     bench_dna_rank::<4>();
     bench_dna_rank::<8>();
     bench_dna_rank::<16>();
