@@ -51,19 +51,27 @@ impl<const STRIDE: usize> DnaRank<STRIDE> {
     }
 
     /// Count a u64 at a time.
-    pub fn ranks(&self, pos: usize) -> [usize; 4] {
+    pub fn ranks_u64(&self, pos: usize) -> [usize; 4] {
         let chunk_idx = pos / STRIDE;
         let byte_idx = chunk_idx * (STRIDE / 4);
         let mut ranks = self.counts[chunk_idx];
+        assert_eq!(ranks.iter().sum::<usize>(), chunk_idx * STRIDE);
 
-        for idx in (byte_idx..pos.div_ceil(4)).step_by(32) {
+        for idx in (byte_idx..pos.div_ceil(4)).step_by(8) {
             let chunk = u64::from_le_bytes(self.seq[idx..idx + 8].try_into().unwrap());
-            let low_bits = (pos - idx).max(32) * 2;
-            let chunk = chunk & ((1u64 << low_bits) - 1);
+            let low_bits = (pos - idx * 4).min(32) * 2;
+            let mask = if low_bits == 64 {
+                u64::MAX
+            } else {
+                (1u64 << low_bits) - 1
+            };
+            let chunk = chunk & mask;
             for c in 0..4 {
                 ranks[c as usize] += count_u64(chunk, c);
             }
         }
+        let extra_counted = (32 - pos) % 32;
+        ranks[0] -= extra_counted;
 
         ranks
     }
