@@ -1,10 +1,15 @@
+#![allow(incomplete_features)]
+#![feature(generic_const_exprs)]
 use std::hint::black_box;
 
 use dna_rank::DnaRank;
 use mem_dbg::MemSize;
 
-fn bench_dna_rank<const STRIDE: usize>() {
-    let n = 1_000_000;
+fn bench_dna_rank<const STRIDE: usize>()
+where
+    [(); STRIDE / 4]:,
+{
+    let n = 1_000_000_000;
     let q = 1_000_000;
     let seq = b"ACGT".repeat(n / 4);
     let rank = DnaRank::<STRIDE>::new(&seq);
@@ -31,13 +36,11 @@ fn bench_dna_rank<const STRIDE: usize>() {
 }
 
 fn main() {
-    bench_dna_rank::<4>();
-    bench_dna_rank::<8>();
-    bench_dna_rank::<16>();
     bench_dna_rank::<32>();
     bench_dna_rank::<64>();
     bench_dna_rank::<128>();
     bench_dna_rank::<256>();
     bench_dna_rank::<512>();
     bench_dna_rank::<1024>();
+    bench_dna_rank::<2048>();
 }

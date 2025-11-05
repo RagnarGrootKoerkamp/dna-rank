@@ -1,3 +1,5 @@
+#![allow(incomplete_features)]
+#![feature(generic_const_exprs)]
 use packed_seq::{PackedSeqVec, SeqVec};
 
 pub type Ranks = [usize; 4];
@@ -10,21 +12,28 @@ pub struct DnaRank<const STRIDE: usize> {
 }
 
 impl<const STRIDE: usize> DnaRank<STRIDE> {
-    pub fn new(seq: &[u8]) -> Self {
-        assert!(STRIDE % 4 == 0, "STRIDE must be a multiple of 4");
+    pub fn new(seq: &[u8]) -> Self
+    where
+        [(); STRIDE / 4]:,
+    {
+        assert!(STRIDE % 32 == 0, "STRIDE must be a multiple of 32");
         let mut counts = Vec::with_capacity(seq.len().div_ceil(STRIDE));
         let mut ranks = [0; 4];
         counts.push(ranks);
-        for chunk in seq.as_chunks::<STRIDE>().0 {
-            for &c in chunk {
-                ranks[packed_seq::pack_char(c) as usize] += 1;
-            }
-            counts.push(ranks);
-        }
 
         let n = seq.len();
         let mut seq = PackedSeqVec::from_ascii(seq).into_raw();
         seq.resize(seq.capacity(), 0);
+
+        for chunk in seq.as_chunks::<{ STRIDE / 4 }>().0 {
+            for chunk in chunk.as_chunks::<8>().0 {
+                for c in 0..4 {
+                    ranks[c as usize] += count_u8x8(chunk, c);
+                }
+            }
+            counts.push(ranks);
+        }
+
         assert!(seq.len() >= n / 4 + 32);
         DnaRank { n, seq, counts }
     }
@@ -75,6 +84,10 @@ impl<const STRIDE: usize> DnaRank<STRIDE> {
 
         ranks
     }
+}
+
+fn count_u8x8(word: &[u8; 8], c: u8) -> usize {
+    count_u64(u64::from_le_bytes(*word), c)
 }
 
 fn count_u64(word: u64, c: u8) -> usize {
