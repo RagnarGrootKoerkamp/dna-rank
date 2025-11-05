@@ -1,6 +1,7 @@
 use std::hint::black_box;
 
 use dna_rank::{DnaRank, Rank};
+use mem_dbg::MemSize;
 
 fn bench_dna_rank<const STRIDE: usize>() {
     let n = 1_000_000;
@@ -17,10 +18,9 @@ fn bench_dna_rank<const STRIDE: usize>() {
         black_box(rank.ranks(*q));
     }
     let duration = start.elapsed();
-    eprintln!(
-        "DnaRank: {} ns/query",
-        duration.as_nanos() as f32 / q as f32
-    );
+    let ns = duration.as_nanos() as f64 / q as f64;
+    let bits = (rank.mem_size(Default::default()) * 8) as f64 / n as f64;
+    eprintln!("DnaRank<{STRIDE:>4}>: {ns:>5.1} ns/query    {bits:>6.2} bits/elem",);
 }
 
 fn main() {
