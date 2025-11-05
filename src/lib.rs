@@ -112,6 +112,35 @@ impl<const STRIDE: usize> DnaRank<STRIDE> {
 
         ranks
     }
+
+    // Count u128 at a time.
+    pub fn ranks_u128(&self, pos: usize) -> [usize; 4] {
+        let chunk_idx = pos / STRIDE;
+        let byte_idx = chunk_idx * (STRIDE / 4);
+        prefetch_index(&self.counts, chunk_idx);
+        let mut ranks = [0; 4];
+
+        for idx in (byte_idx..pos.div_ceil(4)).step_by(16) {
+            let chunk = u128::from_le_bytes(self.seq[idx..idx + 16].try_into().unwrap());
+            let low_bits = (pos - idx * 4).min(64) * 2;
+            let mask = if low_bits == 128 {
+                u128::MAX
+            } else {
+                (1u128 << low_bits) - 1
+            };
+            let chunk = chunk & mask;
+            for c in 0..4 {
+                ranks[c as usize] += count_u128(chunk, c);
+            }
+        }
+        for c in 0..4 {
+            ranks[c] += self.counts[chunk_idx][c];
+        }
+        let extra_counted = (64 - pos) % 64;
+        ranks[0] -= extra_counted;
+
+        ranks
+    }
 }
 
 fn count_u8x8(word: &[u8; 8], c: u8) -> usize {
@@ -133,6 +162,23 @@ fn count_u64(word: u64, c: u8) -> usize {
     // |01| otherwise
     let union = (tmp | (tmp >> 1)) & scatter;
     32 - union.count_ones() as usize
+}
+
+fn count_u128(word: u128, c: u8) -> usize {
+    assert!(c < 4);
+    // c = 00, 01, 10, 11 = cc
+    // scatter = |01|01|01|...
+    let scatter = 0x55555555555555555555555555555555u128;
+    let mask = c as u128 * scatter;
+    // mask = |cc|cc|cc|...
+
+    // should be |00|00|00|... to match c.
+    let tmp = word ^ mask;
+
+    // |00| when c
+    // |01| otherwise
+    let union = (tmp | (tmp >> 1)) & scatter;
+    64 - union.count_ones() as usize
 }
 
 /// Prefetch the given cacheline into L1 cache.

@@ -41,11 +41,16 @@ where
     }
     let ns_u64_pf = start.elapsed().as_nanos() as f64 / q as f64;
 
-    eprintln!("DnaRank<{STRIDE:>4}>:  {bits:>6.2} bit  {ns_naive:>5.1} ns  {ns_u64:>5.1} ns  {ns_u64_pf:>5.1} ns  ",);
+    let start = std::time::Instant::now();
+    for &q in &queries {
+        check(q, rank.ranks_u128(q));
+    }
+    let ns_u128 = start.elapsed().as_nanos() as f64 / q as f64;
+
+    eprintln!("DnaRank<{STRIDE:>4}>:  {bits:>6.2} bit  {ns_naive:>5.1} ns  {ns_u64:>5.1} ns  {ns_u64_pf:>5.1} ns  {ns_u128:>5.1} ns",);
 }
 
 fn main() {
-    bench_dna_rank::<32>();
     bench_dna_rank::<64>();
     bench_dna_rank::<128>();
     bench_dna_rank::<256>();
