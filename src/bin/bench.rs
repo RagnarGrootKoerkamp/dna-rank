@@ -17,12 +17,11 @@ fn time(queries: &[usize], f: impl Fn(usize) -> Ranks) {
     eprint!(" {ns:>5.1}",);
 }
 
-fn bench_dna_rank<const STRIDE: usize>()
+fn bench_dna_rank<const STRIDE: usize>(n: usize)
 where
     [(); STRIDE / 4]:,
 {
     eprint!("{:<20}:", format!("DnaRank<{STRIDE:>4}>"));
-    let n = 1_000_000_000;
     let q = 1_000_000;
     let seq = b"ACGT".repeat(n / 4);
     let rank = DnaRank::<STRIDE>::new(&seq);
@@ -42,9 +41,8 @@ where
     eprintln!();
 }
 
-fn bench_bwa_rank() {
+fn bench_bwa_rank(n: usize) {
     eprint!("{:<20}:", "BwaRank");
-    let n = 1_000_000_000;
     let q = 1_000_000;
     let seq = b"ACGT".repeat(n / 4);
     let rank = BwaRank::new(&seq);
@@ -64,9 +62,12 @@ fn bench_bwa_rank() {
 }
 
 fn main() {
-    bench_bwa_rank();
-    bench_dna_rank::<64>();
-    bench_dna_rank::<128>();
-    bench_dna_rank::<256>();
-    bench_dna_rank::<512>();
+    for n in [1_000_000, 10_000_000, 100_000_000, 1_000_000_000] {
+        eprintln!("n = {}", n);
+        bench_bwa_rank(n);
+        bench_dna_rank::<64>(n);
+        bench_dna_rank::<128>(n);
+        bench_dna_rank::<256>(n);
+        bench_dna_rank::<512>(n);
+    }
 }
