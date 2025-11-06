@@ -166,17 +166,10 @@ where
     let local_ex = LocalExecutor::new();
 
     smol::future::block_on(local_ex.run(async {
-        for batch in queries.as_chunks::<8>().0 {
-            let mut futures: Pin<_> = std::pin::pin!([
-                f(batch[0]),
-                f(batch[1]),
-                f(batch[2]),
-                f(batch[3]),
-                f(batch[4]),
-                f(batch[5]),
-                f(batch[6]),
-                f(batch[7]),
-            ]);
+        for batch in queries.as_chunks::<32>().0 {
+            let mut futures: Pin<&mut [_; 32]> = std::pin::pin!(
+                from_fn(|i| f(batch[i]))
+            );
 
             for mut f in iter_pin_mut(futures.as_mut()) {
                 poll_fn(|cx| {
@@ -211,17 +204,10 @@ where
     let start = std::time::Instant::now();
 
     let future = core::pin::pin!(async {
-        for batch in queries.as_chunks::<8>().0 {
-            let mut futures: Pin<_> = std::pin::pin!([
-                f(batch[0]),
-                f(batch[1]),
-                f(batch[2]),
-                f(batch[3]),
-                f(batch[4]),
-                f(batch[5]),
-                f(batch[6]),
-                f(batch[7]),
-            ]);
+        for batch in queries.as_chunks::<32>().0 {
+            let mut futures: Pin<&mut [_; 32]> = std::pin::pin!(
+                from_fn(|i| f(batch[i]))
+            );
 
             for mut f in iter_pin_mut(futures.as_mut()) {
                 poll_fn(|cx| {
@@ -341,18 +327,18 @@ fn bench_bwa4_rank(seq: &[u8], queries: &[usize]) {
     let bits = 4.0;
     eprint!("{bits:>6.2}b |");
 
-    // time(&queries, |p| rank.ranks_u64_popcnt(p));
+    time(&queries, |p| rank.ranks_u64_popcnt(p));
     // time(&queries, |p| rank.ranks_bytecount_16_all(p));
     // time(&queries, |p| rank.ranks_simd_popcount(p));
-    // eprint!(" |");
-    // time_batch::<32>(&queries, |p| rank.prefetch(p), |p| rank.ranks_u64_popcnt(p));
-    // eprint!(" |");
-    // time_stream(
-    //     &queries,
-    //     32,
-    //     |p| rank.prefetch(p),
-    //     |p| rank.ranks_u64_popcnt(p),
-    // );
+    eprint!(" |");
+    time_batch::<32>(&queries, |p| rank.prefetch(p), |p| rank.ranks_u64_popcnt(p));
+    eprint!(" |");
+    time_stream(
+        &queries,
+        32,
+        |p| rank.prefetch(p),
+        |p| rank.ranks_u64_popcnt(p),
+    );
     // eprint!(" |");
     // time_async_one_task(
     //     &queries,
@@ -367,9 +353,9 @@ fn bench_bwa4_rank(seq: &[u8], queries: &[usize]) {
     // );
     eprint!(" |");
     // time_async_join_all_batch(&queries, 32, |p| rank.ranks_u64_popcnt_async(p));
-    time_async_manual_join_all_batch(&queries, 32, |p| rank.ranks_u64_popcnt_async(p));
-    time_async_manual_join_all_batch(&queries, 32, |p| rank.ranks_u64_popcnt_async_nowake(p));
-    time_async_cassette(&queries, 32, |p| rank.ranks_u64_popcnt_async(p));
+    // time_async_manual_join_all_batch(&queries, 32, |p| rank.ranks_u64_popcnt_async(p));
+    // time_async_manual_join_all_batch(&queries, 32, |p| rank.ranks_u64_popcnt_async_nowake(p));
+    // time_async_cassette(&queries, 32, |p| rank.ranks_u64_popcnt_async(p));
     time_async_cassette(&queries, 32, |p| rank.ranks_u64_popcnt_async_nowake(p));
     eprintln!();
 }
