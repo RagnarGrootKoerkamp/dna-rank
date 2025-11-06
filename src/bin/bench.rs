@@ -1,7 +1,16 @@
 #![allow(incomplete_features, dead_code)]
 #![feature(generic_const_exprs)]
+use std::{
+    array::from_fn,
+    future::poll_fn,
+    pin::{Pin},
+    task::Context,
+};
+
 use dna_rank::{BwaRank, BwaRank2, BwaRank3, BwaRank4, DnaRank, Ranks};
+use futures::{future::join_all, stream::FuturesOrdered, task::noop_waker_ref};
 use mem_dbg::MemSize;
+use smol::{LocalExecutor, stream::StreamExt};
 
 fn check(pos: usize, ranks: Ranks) {
     std::hint::black_box(&ranks);
@@ -56,6 +65,144 @@ fn time_stream(
     eprint!(" {ns:>5.1}",);
 }
 
+fn time_async_one_task<F>(queries: &[usize], _lookahead: usize, f: impl Fn(usize) -> F)
+where
+    F: Future<Output = Ranks>,
+{
+    let start = std::time::Instant::now();
+
+    let local_ex = LocalExecutor::new();
+
+    smol::future::block_on(local_ex.run(async {
+        let mut handles: [_; 32] = from_fn(
+            #[inline(always)]
+            |i| (queries[i], f(queries[i])),
+        );
+        for (i, &q) in queries[32..].iter().enumerate() {
+            let newhandle = f(q);
+
+            let (q, handle) = std::mem::replace(&mut handles[i % 32], (q, newhandle));
+            let fq = handle.await;
+            check(q, fq);
+        }
+        // for (q, handle) in handles {
+        //     let fq = handle.await;
+        //     check(q, fq);
+        // }
+    }));
+
+    let ns = start.elapsed().as_nanos() as f64 / queries.len() as f64;
+    eprint!(" {ns:>5.1}",);
+}
+
+fn time_async_futures_ordered<F>(queries: &[usize], _lookahead: usize, f: impl Fn(usize) -> F)
+where
+    F: Future<Output = Ranks>,
+{
+    let start = std::time::Instant::now();
+
+    let local_ex = LocalExecutor::new();
+
+    smol::future::block_on(local_ex.run(async {
+        let cx = &mut Context::from_waker(noop_waker_ref());
+        for batch in queries.as_chunks::<32>().0 {
+            let mut futures: FuturesOrdered<_> = batch.iter().map(|&q| f(q)).collect();
+
+            for &q in batch {
+                let fq = loop {
+                    match futures.poll_next(cx) {
+                        std::task::Poll::Ready(fq) => break fq.unwrap(),
+                        std::task::Poll::Pending => continue,
+                    }
+                };
+                check(q, fq);
+            }
+        }
+    }));
+
+    let ns = start.elapsed().as_nanos() as f64 / queries.len() as f64;
+    eprint!(" {ns:>5.1}",);
+}
+
+fn time_async_join_all_batch<F>(queries: &[usize], _lookahead: usize, f: impl Fn(usize) -> F)
+where
+    F: Future<Output = Ranks>,
+{
+    let start = std::time::Instant::now();
+
+    let local_ex = LocalExecutor::new();
+
+    smol::future::block_on(local_ex.run(async {
+        for batch in queries.as_chunks::<16>().0 {
+            let futures = batch.iter().map(|&q| f(q));
+            // NOTE: This needs batches of size <30 to avoid switching to a heavy implementation.
+            for (&q, fq) in batch.iter().zip(join_all(futures).await) {
+                check(q, fq);
+            }
+        }
+    }));
+
+    let ns = start.elapsed().as_nanos() as f64 / queries.len() as f64;
+    eprint!(" {ns:>5.1}",);
+}
+
+/// copied from futures crate
+fn iter_pin_mut<T>(slice: Pin<&mut [T]>) -> impl Iterator<Item = Pin<&mut T>> {
+    // Safety: `std` _could_ make this unsound if it were to decide Pin's
+    // invariants aren't required to transmit through slices. Otherwise this has
+    // the same safety as a normal field pin projection.
+    unsafe { slice.get_unchecked_mut() }
+        .iter_mut()
+        .map(|t| unsafe { Pin::new_unchecked(t) })
+}
+
+fn time_async_manual_join_all_batch<F>(queries: &[usize], _lookahead: usize, f: impl Fn(usize) -> F)
+where
+    F: Future<Output = Ranks>,
+{
+    let start = std::time::Instant::now();
+
+    let local_ex = LocalExecutor::new();
+
+    smol::future::block_on(local_ex.run(async {
+        for batch in queries.as_chunks::<8>().0 {
+            let mut futures: Pin<_> = std::pin::pin!([
+                f(batch[0]),
+                f(batch[1]),
+                f(batch[2]),
+                f(batch[3]),
+                f(batch[4]),
+                f(batch[5]),
+                f(batch[6]),
+                f(batch[7]),
+            ]);
+
+            for mut f in iter_pin_mut(futures.as_mut()) {
+                poll_fn(|cx| {
+                    // eprintln!("First poll");
+                    let r = f.as_mut().poll(cx);
+                    assert!(r.is_pending());
+                    std::task::Poll::Ready(())
+                })
+                .await;
+            }
+
+            for mut f in iter_pin_mut(futures.as_mut()) {
+                poll_fn(|cx| {
+                    // eprintln!("Second poll");
+                    let r = f.as_mut().poll(cx);
+                    assert!(r.is_ready());
+                    r
+                })
+                .await;
+            }
+        }
+    }));
+
+    let ns = start.elapsed().as_nanos() as f64 / queries.len() as f64;
+    eprint!(" {ns:>5.1}",);
+}
+
 #[inline(never)]
 fn bench_dna_rank<const STRIDE: usize>(seq: &[u8], queries: &[usize])
 where
@@ -95,7 +242,7 @@ fn bench_bwa_rank(seq: &[u8], queries: &[usize]) {
     // time(&queries, |p| rank.ranks_u128_all(p));
     // time(&queries, |p| rank.ranks_bytecount(p));
     time(&queries, |p| rank.ranks_bytecount_4(p)); // original
-                                                   // time(&queries, |p| rank.ranks_bytecount_8(p));
+    // time(&queries, |p| rank.ranks_bytecount_8(p));
     time(&queries, |p| rank.ranks_bytecount_16(p));
     time(&queries, |p| rank.ranks_bytecount_16_all(p)); // bad codegen?
     eprintln!();
@@ -140,35 +287,33 @@ fn bench_bwa4_rank(seq: &[u8], queries: &[usize]) {
     let bits = 4.0;
     eprint!("{bits:>6.2}b |");
 
-    time(&queries, |p| rank.ranks_u64_3(p));
-    time(&queries, |p| rank.ranks_bytecount_16_all(p));
-    time(&queries, |p| rank.ranks_simd_popcount(p));
+    // time(&queries, |p| rank.ranks_u64_popcnt(p));
+    // time(&queries, |p| rank.ranks_bytecount_16_all(p));
+    // time(&queries, |p| rank.ranks_simd_popcount(p));
+    // eprint!(" |");
+    // time_batch::<32>(&queries, |p| rank.prefetch(p), |p| rank.ranks_u64_popcnt(p));
+    // eprint!(" |");
+    // time_stream(
+    //     &queries,
+    //     32,
+    //     |p| rank.prefetch(p),
+    //     |p| rank.ranks_u64_popcnt(p),
+    // );
+    // eprint!(" |");
+    // time_async_one_task(
+    //     &queries,
+    //     32,
+    //     |p| rank.ranks_u64_popcnt_async(p),
+    // );
+    // eprint!(" |");
+    // time_async_futures_ordered(
+    //     &queries,
+    //     32,
+    //     |p| rank.ranks_u64_popcnt_async(p),
+    // );
     eprint!(" |");
-    time_batch::<32>(&queries, |p| rank.prefetch(p), |p| rank.ranks_u64_3(p));
-    time_batch::<32>(
-        &queries,
-        |p| rank.prefetch(p),
-        |p| rank.ranks_bytecount_16_all(p),
-    );
-    time_batch::<32>(
-        &queries,
-        |p| rank.prefetch(p),
-        |p| rank.ranks_simd_popcount(p),
-    );
-    eprint!(" |");
-    time_stream(&queries, 32, |p| rank.prefetch(p), |p| rank.ranks_u64_3(p));
-    time_stream(
-        &queries,
-        32,
-        |p| rank.prefetch(p),
-        |p| rank.ranks_bytecount_16_all(p),
-    );
-    time_stream(
-        &queries,
-        32,
-        |p| rank.prefetch(p),
-        |p| rank.ranks_simd_popcount(p),
-    );
+    // time_async_join_all_batch(&queries, 32, |p| rank.ranks_u64_popcnt_async(p));
+    time_async_manual_join_all_batch(&queries, 32, |p| rank.ranks_u64_popcnt_async(p));
     eprintln!();
 }
 
@@ -191,7 +336,7 @@ fn main() {
             .collect::<Vec<_>>();
 
         bench_bwa4_rank(&seq, &queries);
-        bench_bwa3_rank(&seq, &queries);
+        // bench_bwa3_rank(&seq, &queries);
         // bench_bwa2_rank(&seq, &queries);
         // bench_bwa_rank(&seq, &queries);
         // bench_dna_rank::<64>(&seq, &queries);
