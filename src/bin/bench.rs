@@ -1,6 +1,6 @@
-#![allow(incomplete_features)]
+#![allow(incomplete_features, dead_code)]
 #![feature(generic_const_exprs)]
-use dna_rank::{BwaRank, BwaRank2, DnaRank, Ranks};
+use dna_rank::{BwaRank, BwaRank2, BwaRank3, DnaRank, Ranks};
 use mem_dbg::MemSize;
 
 fn check(pos: usize, ranks: Ranks) {
@@ -68,8 +68,23 @@ fn bench_bwa_rank(seq: &[u8], queries: &[usize]) {
 
 #[inline(never)]
 fn bench_bwa2_rank(seq: &[u8], queries: &[usize]) {
-    eprint!("{:<20}:", "BwaRank");
+    eprint!("{:<20}:", "BwaRank2");
     let rank = BwaRank2::new(&seq);
+
+    // let bits = (rank.mem_size(Default::default()) * 8) as f64 / seq.len() as f64;
+    let bits = 4.0;
+    eprint!("{bits:>6.2}b |");
+
+    time(&queries, |p| rank.ranks_u128_3(p)); // overall fastest
+    time(&queries, |p| rank.ranks_bytecount_16_all(p));
+    time(&queries, |p| rank.ranks_simd_popcount(p));
+    eprintln!();
+}
+
+#[inline(never)]
+fn bench_bwa3_rank(seq: &[u8], queries: &[usize]) {
+    eprint!("{:<20}:", "BwaRank3");
+    let rank = BwaRank3::new(&seq);
 
     // let bits = (rank.mem_size(Default::default()) * 8) as f64 / seq.len() as f64;
     let bits = 4.0;
@@ -90,9 +105,10 @@ fn main() {
             .map(|_| rand::random_range(0..seq.len()))
             .collect::<Vec<_>>();
 
+        bench_bwa3_rank(&seq, &queries);
         bench_bwa2_rank(&seq, &queries);
-        bench_bwa_rank(&seq, &queries);
-        bench_dna_rank::<64>(&seq, &queries);
-        bench_dna_rank::<128>(&seq, &queries);
+        // bench_bwa_rank(&seq, &queries);
+        // bench_dna_rank::<64>(&seq, &queries);
+        // bench_dna_rank::<128>(&seq, &queries);
     }
 }
