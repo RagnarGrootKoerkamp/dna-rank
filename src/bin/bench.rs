@@ -1,11 +1,6 @@
 #![allow(incomplete_features, dead_code)]
 #![feature(generic_const_exprs)]
-use std::{
-    array::from_fn,
-    future::poll_fn,
-    pin::{Pin},
-    task::Context,
-};
+use std::{array::from_fn, future::poll_fn, pin::Pin, task::Context};
 
 use cassette::Cassette;
 use dna_rank::{BwaRank, BwaRank2, BwaRank3, BwaRank4, DnaRank, Ranks};
@@ -157,42 +152,42 @@ fn iter_pin_mut<T>(slice: Pin<&mut [T]>) -> impl Iterator<Item = Pin<&mut T>> {
         .map(|t| unsafe { Pin::new_unchecked(t) })
 }
 
+async fn async_batches<F>(queries: &[usize], f: impl Fn(usize) -> F)
+where
+    F: Future<Output = Ranks>,
+{
+    for batch in queries.as_chunks::<32>().0 {
+        let mut futures: Pin<&mut [_; 32]> = std::pin::pin!(from_fn(|i| f(batch[i])));
+
+        for mut f in iter_pin_mut(futures.as_mut()) {
+            poll_fn(|cx| {
+                // eprintln!("First poll");
+                let r = f.as_mut().poll(cx);
+                assert!(r.is_pending());
+                std::task::Poll::Ready(())
+            })
+            .await;
+        }
+
+        for mut f in iter_pin_mut(futures.as_mut()) {
+            poll_fn(|cx| {
+                // eprintln!("Second poll");
+                let r = f.as_mut().poll(cx);
+                assert!(r.is_ready());
+                r
+            })
+            .await;
+        }
+    }
+}
+
 fn time_async_manual_join_all_batch<F>(queries: &[usize], _lookahead: usize, f: impl Fn(usize) -> F)
 where
     F: Future<Output = Ranks>,
 {
     let start = std::time::Instant::now();
-
     let local_ex = LocalExecutor::new();
-
-    smol::future::block_on(local_ex.run(async {
-        for batch in queries.as_chunks::<32>().0 {
-            let mut futures: Pin<&mut [_; 32]> = std::pin::pin!(
-                from_fn(|i| f(batch[i]))
-            );
-
-            for mut f in iter_pin_mut(futures.as_mut()) {
-                poll_fn(|cx| {
-                    // eprintln!("First poll");
-                    let r = f.as_mut().poll(cx);
-                    assert!(r.is_pending());
-                    std::task::Poll::Ready(())
-                })
-                .await;
-            }
-
-            for mut f in iter_pin_mut(futures.as_mut()) {
-                poll_fn(|cx| {
-                    // eprintln!("Second poll");
-                    let r = f.as_mut().poll(cx);
-                    assert!(r.is_ready());
-                    r
-                })
-                .await;
-            }
-        }
-    }));
-
+    smol::future::block_on(local_ex.run(async { async_batches(queries, f).await }));
     let ns = start.elapsed().as_nanos() as f64 / queries.len() as f64;
     eprint!(" {ns:>5.1}",);
 }
@@ -202,43 +197,8 @@ where
     F: Future<Output = Ranks>,
 {
     let start = std::time::Instant::now();
-
-    let future = core::pin::pin!(async {
-        for batch in queries.as_chunks::<32>().0 {
-            let mut futures: Pin<&mut [_; 32]> = std::pin::pin!(
-                from_fn(|i| f(batch[i]))
-            );
-
-            for mut f in iter_pin_mut(futures.as_mut()) {
-                poll_fn(|cx| {
-                    // eprintln!("First poll");
-                    let r = f.as_mut().poll(cx);
-                    assert!(r.is_pending());
-                    std::task::Poll::Ready(())
-                })
-                .await;
-            }
-
-            for mut f in iter_pin_mut(futures.as_mut()) {
-                poll_fn(|cx| {
-                    // eprintln!("Second poll");
-                    let r = f.as_mut().poll(cx);
-                    assert!(r.is_ready());
-                    r
-                })
-                .await;
-            }
-        }
-    });
-
-    let mut cm = Cassette::new(future);
-
-    loop {
-        if let Some(()) = cm.poll_on() {
-            break;
-        }
-    }
-
+    let future = core::pin::pin!(async { async_batches(queries, f).await });
+    cassette::block_on(future);
     let ns = start.elapsed().as_nanos() as f64 / queries.len() as f64;
     eprint!(" {ns:>5.1}",);
 }
