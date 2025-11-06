@@ -964,7 +964,6 @@ impl BwaRank2 {
             let mask5 = u8x32::splat(0x55);
             let mask3: u64x4 = unsafe { t(u8x32::splat(0x33)) };
             let mask_f: u64x4 = unsafe { t(u8x32::splat(0x0f)) };
-            let mask_ff: u64x4 = unsafe { t(u16x16::splat(0x00ff)) };
             // bits of the 4 chars
             // 0000 | 1010  (0, 2)
             const C02: u8x32 = u8x32::from_array(unsafe { t([[!0u8; 16], [!0xAAu8; 16]]) });
@@ -1192,7 +1191,6 @@ impl BwaRank3 {
             let mask5 = u8x32::splat(0x55);
             let mask3: u64x4 = unsafe { t(u8x32::splat(0x33)) };
             let mask_f: u64x4 = unsafe { t(u8x32::splat(0x0f)) };
-            let mask_ff: u64x4 = unsafe { t(u16x16::splat(0x00ff)) };
             // bits of the 4 chars
             // 0000 | 1010  (0, 2)
             const C02: u8x32 = u8x32::from_array(unsafe { t([[!0u8; 16], [!0xAAu8; 16]]) });
@@ -1418,7 +1416,6 @@ impl BwaRank4 {
             let mask5: u64x4 = unsafe { t(u8x32::splat(0x55)) };
             let mask3: u64x4 = unsafe { t(u8x32::splat(0x33)) };
             let mask_f: u64x4 = unsafe { t(u8x32::splat(0x0f)) };
-            let mask_ff: u64x4 = unsafe { t(u16x16::splat(0x00ff)) };
             // bits of the 4 chars
             // 00 | 01 | 10 | 11  (0, 1, 2, 3)
             const C: u64x4 = u64x4::from_array(unsafe {

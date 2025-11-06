@@ -112,8 +112,17 @@ fn bench_bwa4_rank(seq: &[u8], queries: &[usize]) {
 }
 
 fn main() {
+    #[cfg(debug_assertions)]
+    let q = 100_000;
+    #[cfg(debug_assertions)]
+    let ns = [100_000];
+    #[cfg(not(debug_assertions))]
     let q = 10_000_000;
-    for n in [100_000, 10_000_000, 1_000_000_000] {
+    #[cfg(not(debug_assertions))]
+    let ns = [100_000, 10_000_000, 1_000_000_000];
+
+    for n in ns {
+        // for n in [100_000] {
         eprintln!("n = {}", n);
         let seq = b"ACTG".repeat(n / 4);
         let queries = (0..q)
@@ -122,7 +131,7 @@ fn main() {
 
         bench_bwa4_rank(&seq, &queries);
         bench_bwa3_rank(&seq, &queries);
-        bench_bwa2_rank(&seq, &queries);
+        // bench_bwa2_rank(&seq, &queries);
         // bench_bwa_rank(&seq, &queries);
         // bench_dna_rank::<64>(&seq, &queries);
         // bench_dna_rank::<128>(&seq, &queries);
