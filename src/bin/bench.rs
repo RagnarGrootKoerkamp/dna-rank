@@ -50,6 +50,8 @@ fn bench_bwa_rank(seq: &[u8], queries: &[usize]) {
     time(&queries, |p| rank.ranks_u128(p));
     time(&queries, |p| rank.ranks_u128_3(p)); // 2nd best
     time(&queries, |p| rank.ranks_u128_all(p));
+    time(&queries, |p| rank.ranks_bytecount(p));
+    time(&queries, |p| rank.ranks_bytecount_4(p)); // original
     eprintln!();
 }
 

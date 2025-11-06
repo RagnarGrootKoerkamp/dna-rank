@@ -241,6 +241,23 @@ fn count_u8x8(word: &[u8; 8], c: u8) -> u32 {
 }
 
 #[inline(always)]
+fn count_u8(word: u8, c: u8) -> u32 {
+    // c = 00, 01, 10, 11 = cc
+    // scatter = |01|01|01|...
+    let scatter = 0x55u8;
+    let mask = c as u8 * scatter;
+    // mask = |cc|cc|cc|...
+
+    // should be |00|00|00|... to match c.
+    let tmp = word ^ mask;
+
+    // |00| when c
+    // |01| otherwise
+    let union = (tmp | (tmp >> 1)) & scatter;
+    4 - union.count_ones()
+}
+
+#[inline(always)]
 fn count_u64(word: u64, c: u8) -> u32 {
     // c = 00, 01, 10, 11 = cc
     // scatter = |01|01|01|...
@@ -317,6 +334,8 @@ pub struct BwaBlock {
 pub struct BwaRank {
     n: usize,
     blocks: Vec<BwaBlock>,
+    /// For each byte, a u32 consisting of 4 u8's containing the count of ACTG in byte.
+    counts: [u32; 256],
 }
 
 impl BwaRank {
@@ -340,7 +359,74 @@ impl BwaRank {
             }
         }
 
-        BwaRank { n, blocks }
+        let mut counts = [0u32; 256];
+        for b in 0..256 {
+            for c in 0..4 {
+                counts[b] |= (count_u8(b as u8, c) as u32) << (c * 8);
+            }
+        }
+        BwaRank { n, blocks, counts }
+    }
+
+    #[inline(always)]
+    pub fn ranks_bytecount(&self, pos: usize) -> Ranks {
+        let chunk_idx = pos / 128;
+        prefetch_index(&self.blocks, chunk_idx);
+        let chunk = &self.blocks[chunk_idx];
+        let mut ranks = [0; 4];
+        for c in 0..4 {
+            ranks[c] += chunk.ranks[c] as u32;
+        }
+
+        let pos = pos % 128;
+
+        let mut counts: u32 = 0;
+
+        for idx in 0..pos.div_ceil(4) {
+            let byte = chunk.seq[idx];
+            let low_bits = (pos - idx * 4).min(4) * 2;
+            let mask = (1u64 << low_bits) - 1;
+            let byte = byte & mask as u8;
+            counts += self.counts[byte as usize];
+        }
+        for c in 0..4 {
+            ranks[c] += (counts >> (8 * c)) as u8 as u32;
+        }
+        let extra_counted = (32 - pos) % 32;
+        ranks[0] -= extra_counted as u32;
+        ranks
+    }
+
+    #[inline(always)]
+    pub fn ranks_bytecount_4(&self, pos: usize) -> Ranks {
+        let chunk_idx = pos / 128;
+        prefetch_index(&self.blocks, chunk_idx);
+        let chunk = &self.blocks[chunk_idx];
+        let mut ranks = [0; 4];
+        for c in 0..4 {
+            ranks[c] += chunk.ranks[c] as u32;
+        }
+
+        let pos = pos % 128;
+
+        let mut counts: u32 = 0;
+
+        for idx in (0..pos.div_ceil(4)).step_by(4) {
+            let chunk = u32::from_le_bytes(chunk.seq[idx..idx + 4].try_into().unwrap());
+            let low_bits = (pos - idx * 4).min(16) * 2;
+            let mask = (1u64 << low_bits) - 1;
+            let chunk = chunk & mask as u32;
+            counts += self.counts[(chunk >> 0) as u8 as usize];
+            counts += self.counts[(chunk >> 8) as u8 as usize];
+            counts += self.counts[(chunk >> 16) as u8 as usize];
+            counts += self.counts[(chunk >> 24) as u8 as usize];
+        }
+        for c in 0..4 {
+            ranks[c] += (counts >> (8 * c)) as u8 as u32;
+        }
+        let extra_counted = (32 - pos) % 32;
+        ranks[0] -= extra_counted as u32;
+        ranks
     }
 
     #[inline(always)]
