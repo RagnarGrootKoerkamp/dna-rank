@@ -80,7 +80,7 @@ impl<const STRIDE: usize> DnaRank<STRIDE> {
                 ranks[c as usize] += count_u64(chunk, c);
             }
         }
-        let extra_counted = (32 - pos) % 32;
+        let extra_counted = 32usize.wrapping_sub(pos) % 32;
         ranks[0] -= extra_counted as u32;
 
         ranks
@@ -110,7 +110,7 @@ impl<const STRIDE: usize> DnaRank<STRIDE> {
         for c in 0..4 {
             ranks[c] += self.counts[chunk_idx][c];
         }
-        let extra_counted = (32 - pos) % 32;
+        let extra_counted = 32usize.wrapping_sub(pos) % 32;
         ranks[0] -= extra_counted as u32;
 
         ranks
@@ -199,7 +199,7 @@ impl<const STRIDE: usize> DnaRank<STRIDE> {
         for c in 0..4 {
             ranks[c] += self.counts[chunk_idx][c];
         }
-        let extra_counted = (64 - pos) % 64;
+        let extra_counted = (64usize.wrapping_sub(pos)) % 64;
         ranks[0] -= extra_counted as u32;
 
         ranks
@@ -390,7 +390,7 @@ impl BwaRank {
         for c in 0..4 {
             ranks[c] += (counts >> (8 * c)) as u8 as u32;
         }
-        let extra_counted = (32 - pos) % 32;
+        let extra_counted = (4usize.wrapping_sub(pos)) % 4;
         ranks[0] -= extra_counted as u32;
         ranks
     }
@@ -422,7 +422,7 @@ impl BwaRank {
         for c in 0..4 {
             ranks[c] += (counts >> (8 * c)) as u8 as u32;
         }
-        let extra_counted = (32 - pos) % 32;
+        let extra_counted = (16usize.wrapping_sub(pos)) % 16;
         ranks[0] -= extra_counted as u32;
         ranks
     }
@@ -462,7 +462,7 @@ impl BwaRank {
         for c in 0..4 {
             ranks[c] += (counts >> (8 * c)) as u8 as u32;
         }
-        let extra_counted = (32 - pos) % 32;
+        let extra_counted = (32usize.wrapping_sub(pos)) % 32;
         ranks[0] -= extra_counted as u32;
         ranks
     }
@@ -510,7 +510,7 @@ impl BwaRank {
         for c in 0..4 {
             ranks[c] += (counts >> (8 * c)) as u8 as u32;
         }
-        let extra_counted = (32 - pos) % 32;
+        let extra_counted = (64usize.wrapping_sub(pos)) % 64;
         ranks[0] -= extra_counted as u32;
         ranks
     }
@@ -587,7 +587,7 @@ impl BwaRank {
         for c in 0..4 {
             ranks[c] += chunk.ranks[c] as u32;
         }
-        let extra_counted = (32 - pos) % 32;
+        let extra_counted = (32usize.wrapping_sub(pos)) % 32;
         ranks[0] -= extra_counted as u32;
         ranks
     }
@@ -644,7 +644,7 @@ impl BwaRank {
         for c in 0..4 {
             ranks[c] += chunk.ranks[c] as u32;
         }
-        let extra_counted = (64 - pos) % 64;
+        let extra_counted = (64usize.wrapping_sub(pos)) % 64;
         ranks[0] -= extra_counted as u32;
         ranks
     }
