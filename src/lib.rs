@@ -39,6 +39,7 @@ impl<const STRIDE: usize> DnaRank<STRIDE> {
     }
 
     /// Loop over packed characters.
+    #[inline(always)]
     pub fn ranks_naive(&self, pos: usize) -> Ranks {
         let chunk_idx = pos / STRIDE;
         let byte_idx = chunk_idx * (STRIDE / 4);
@@ -60,6 +61,7 @@ impl<const STRIDE: usize> DnaRank<STRIDE> {
     }
 
     /// Count a u64 at a time.
+    #[inline(always)]
     pub fn ranks_u64(&self, pos: usize) -> Ranks {
         let chunk_idx = pos / STRIDE;
         let byte_idx = chunk_idx * (STRIDE / 4);
@@ -85,6 +87,7 @@ impl<const STRIDE: usize> DnaRank<STRIDE> {
     }
 
     // Prefetch the ranks, and only read them after scanning.
+    #[inline(always)]
     pub fn ranks_u64_prefetch(&self, pos: usize) -> Ranks {
         let chunk_idx = pos / STRIDE;
         let byte_idx = chunk_idx * (STRIDE / 4);
@@ -114,6 +117,7 @@ impl<const STRIDE: usize> DnaRank<STRIDE> {
     }
 
     // Prefetch the ranks, and only read them after scanning.
+    #[inline(always)]
     pub fn ranks_u64_3(&self, pos: usize) -> Ranks {
         let chunk_idx = pos / STRIDE;
         let byte_idx = chunk_idx * (STRIDE / 4);
@@ -142,6 +146,7 @@ impl<const STRIDE: usize> DnaRank<STRIDE> {
     }
 
     // Prefetch the ranks, and only read them after scanning.
+    #[inline(always)]
     pub fn ranks_u64_prefetch_all(&self, pos: usize) -> Ranks {
         let chunk_idx = pos / STRIDE;
         let byte_idx = chunk_idx * (STRIDE / 4);
@@ -171,6 +176,7 @@ impl<const STRIDE: usize> DnaRank<STRIDE> {
     }
 
     // Count u128 at a time.
+    #[inline(always)]
     pub fn ranks_u128(&self, pos: usize) -> Ranks {
         let chunk_idx = pos / STRIDE;
         let byte_idx = chunk_idx * (STRIDE / 4);
@@ -199,6 +205,7 @@ impl<const STRIDE: usize> DnaRank<STRIDE> {
         ranks
     }
 
+    #[inline(always)]
     // Count u128 at a time.
     pub fn ranks_u128_3(&self, pos: usize) -> Ranks {
         let chunk_idx = pos / STRIDE;
@@ -335,6 +342,7 @@ impl BwaRank {
         BwaRank { n, blocks }
     }
 
+    #[inline(always)]
     pub fn ranks_u64(&self, pos: usize) -> Ranks {
         let chunk_idx = pos / 128;
         prefetch_index(&self.blocks, chunk_idx);
@@ -363,6 +371,7 @@ impl BwaRank {
         ranks
     }
 
+    #[inline(always)]
     pub fn ranks_u64_3(&self, pos: usize) -> Ranks {
         let chunk_idx = pos / 128;
         prefetch_index(&self.blocks, chunk_idx);
@@ -390,6 +399,7 @@ impl BwaRank {
         ranks
     }
 
+    #[inline(always)]
     pub fn ranks_u128(&self, pos: usize) -> Ranks {
         let chunk_idx = pos / 128;
         prefetch_index(&self.blocks, chunk_idx);
@@ -418,6 +428,7 @@ impl BwaRank {
         ranks
     }
 
+    #[inline(always)]
     pub fn ranks_u128_3(&self, pos: usize) -> Ranks {
         let chunk_idx = pos / 128;
         prefetch_index(&self.blocks, chunk_idx);
@@ -445,6 +456,7 @@ impl BwaRank {
         ranks
     }
 
+    #[inline(always)]
     pub fn ranks_u64_all(&self, pos: usize) -> Ranks {
         let chunk_idx = pos / 128;
         prefetch_index(&self.blocks, chunk_idx);
@@ -473,6 +485,7 @@ impl BwaRank {
         ranks
     }
 
+    #[inline(always)]
     pub fn ranks_u128_all(&self, pos: usize) -> Ranks {
         let chunk_idx = pos / 128;
         prefetch_index(&self.blocks, chunk_idx);
@@ -561,6 +574,7 @@ impl BwaRank2 {
         BwaRank2 { n, blocks }
     }
 
+    #[inline(always)]
     pub fn ranks_u128_3(&self, pos: usize) -> Ranks {
         let chunk_idx = pos / 128;
         prefetch_index(&self.blocks, chunk_idx);

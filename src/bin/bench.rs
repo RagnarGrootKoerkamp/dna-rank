@@ -3,7 +3,6 @@
 use dna_rank::{BwaRank, BwaRank2, DnaRank, Ranks};
 use mem_dbg::MemSize;
 
-#[inline(never)]
 fn check(pos: usize, ranks: Ranks) {
     assert_eq!(pos as u32, ranks.iter().sum());
 }
