@@ -4,10 +4,11 @@ use std::{
     arch::x86_64::{_mm256_shuffle_pd, _mm256_unpackhi_epi64, _mm256_unpacklo_epi64},
     hint::black_box,
     mem::transmute,
-    simd::{u16x16, u32x8, u64x4, u8x32},
+    simd::{u8x32, u16x16, u32x8, u64x4},
 };
 
 use packed_seq::{PackedSeqVec, SeqVec};
+use smol::future::yield_now;
 
 pub type Ranks = [u32; 4];
 
@@ -1315,7 +1316,7 @@ impl BwaRank4 {
     }
 
     #[inline(always)]
-    pub fn ranks_u64_3(&self, pos: usize) -> Ranks {
+    pub fn ranks_u64_popcnt(&self, pos: usize) -> Ranks {
         let chunk_idx = pos / 128;
         prefetch_index(&self.blocks, chunk_idx);
         let chunk = &self.blocks[chunk_idx];
@@ -1449,6 +1450,45 @@ impl BwaRank4 {
             for c in 0..4 {
                 // ranks[c] += sum64[c] as u8 as u32;
                 ranks[c] += sum64[2 * c] as u8 as u32;
+            }
+        }
+
+        for c in 0..4 {
+            ranks[c] += chunk.ranks[c];
+        }
+        for c in 0..4 {
+            ranks[c] += (chunk.part_ranks[c] >> (quart * 8)) & 0xff;
+        }
+
+        // Fix count for 0.
+        let extra_counted = 32 - quart_pos;
+        ranks[0] -= extra_counted as u32;
+
+        ranks
+    }
+
+    #[inline(always)]
+    pub async fn ranks_u64_popcnt_async(&self, pos: usize) -> Ranks {
+        let chunk_idx = pos / 128;
+        prefetch_index(&self.blocks, chunk_idx);
+
+        yield_now().await;
+
+        let chunk = &self.blocks[chunk_idx];
+        let chunk_pos = pos % 128;
+        let quart_pos = pos % 32;
+
+        let quart = chunk_pos / 32;
+        let mut ranks = [0; 4];
+
+        // Count chosen quart.
+        {
+            let idx = quart * 8;
+            let chunk = u64::from_le_bytes(chunk.seq[idx..idx + 8].try_into().unwrap());
+            let mask = self.masks[quart_pos];
+            let chunk = chunk & mask;
+            for c in 0..4 {
+                ranks[c as usize] += count_u64(chunk, c);
             }
         }
 
