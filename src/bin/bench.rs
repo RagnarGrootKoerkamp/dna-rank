@@ -17,21 +17,15 @@ fn time(queries: &[usize], f: impl Fn(usize) -> Ranks) {
     eprint!(" {ns:>5.1}",);
 }
 
-fn bench_dna_rank<const STRIDE: usize>(n: usize)
+fn bench_dna_rank<const STRIDE: usize>(seq: &[u8], queries: &[usize])
 where
     [(); STRIDE / 4]:,
 {
     eprint!("{:<20}:", format!("DnaRank<{STRIDE:>4}>"));
-    let q = 1_000_000;
-    let seq = b"ACGT".repeat(n / 4);
     let rank = DnaRank::<STRIDE>::new(&seq);
 
-    let bits = (rank.mem_size(Default::default()) * 8) as f64 / n as f64;
+    let bits = (rank.mem_size(Default::default()) * 8) as f64 / seq.len() as f64;
     eprint!("{bits:>6.2}b |");
-
-    let queries = (0..q)
-        .map(|_| rand::random_range(0..seq.len()))
-        .collect::<Vec<_>>();
 
     time(&queries, |p| rank.ranks_naive(p));
     time(&queries, |p| rank.ranks_u64(p));
@@ -43,18 +37,12 @@ where
     eprintln!();
 }
 
-fn bench_bwa_rank(n: usize) {
+fn bench_bwa_rank(seq: &[u8], queries: &[usize]) {
     eprint!("{:<20}:", "BwaRank");
-    let q = 1_000_000;
-    let seq = b"ACGT".repeat(n / 4);
     let rank = BwaRank::new(&seq);
 
-    let bits = (rank.mem_size(Default::default()) * 8) as f64 / n as f64;
+    let bits = (rank.mem_size(Default::default()) * 8) as f64 / seq.len() as f64;
     eprint!("{bits:>6.2}b |");
-
-    let queries = (0..q)
-        .map(|_| rand::random_range(0..seq.len()))
-        .collect::<Vec<_>>();
 
     time(&queries, |p| rank.ranks_u64(p));
     time(&queries, |p| rank.ranks_u64_all(p));
@@ -65,31 +53,31 @@ fn bench_bwa_rank(n: usize) {
     eprintln!();
 }
 
-fn bench_bwa2_rank(n: usize) {
+fn bench_bwa2_rank(seq: &[u8], queries: &[usize]) {
     eprint!("{:<20}:", "BwaRank");
-    let q = 1_000_000;
-    let seq = b"ACGT".repeat(n / 4);
     let rank = BwaRank2::new(&seq);
 
-    let bits = (rank.mem_size(Default::default()) * 8) as f64 / n as f64;
+    let bits = (rank.mem_size(Default::default()) * 8) as f64 / seq.len() as f64;
     eprint!("{bits:>6.2}b |");
-
-    let queries = (0..q)
-        .map(|_| rand::random_range(0..seq.len()))
-        .collect::<Vec<_>>();
 
     time(&queries, |p| rank.ranks_u128_3(p));
     eprintln!();
 }
 
 fn main() {
-    for n in [1_000_000, 10_000_000, 100_000_000, 1_000_000_000] {
+    let q = 1_000_000;
+    for n in [100_000, 10_000_000, 1_000_000_000] {
         eprintln!("n = {}", n);
-        bench_bwa2_rank(n);
-        bench_bwa_rank(n);
-        bench_dna_rank::<64>(n);
-        bench_dna_rank::<128>(n);
-        bench_dna_rank::<256>(n);
-        bench_dna_rank::<512>(n);
+        let seq = b"ACGT".repeat(n / 4);
+        let queries = (0..q)
+            .map(|_| rand::random_range(0..seq.len()))
+            .collect::<Vec<_>>();
+
+        bench_bwa2_rank(&seq, &queries);
+        bench_bwa_rank(&seq, &queries);
+        bench_dna_rank::<64>(&seq, &queries);
+        bench_dna_rank::<128>(&seq, &queries);
+        bench_dna_rank::<256>(&seq, &queries);
+        bench_dna_rank::<512>(&seq, &queries);
     }
 }
