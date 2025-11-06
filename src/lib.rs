@@ -1,5 +1,7 @@
 #![allow(incomplete_features)]
 #![feature(generic_const_exprs)]
+use std::hint::black_box;
+
 use packed_seq::{PackedSeqVec, SeqVec};
 
 pub type Ranks = [u32; 4];
@@ -538,22 +540,24 @@ impl BwaRank {
                 (1u128 << low_bits) - 1
             };
             let chunk = chunk & mask;
-            counts += self.counts[(chunk >> 0) as u8 as usize];
-            counts += self.counts[(chunk >> 8) as u8 as usize];
-            counts += self.counts[(chunk >> 16) as u8 as usize];
-            counts += self.counts[(chunk >> 24) as u8 as usize];
-            counts += self.counts[(chunk >> 32) as u8 as usize];
-            counts += self.counts[(chunk >> 40) as u8 as usize];
-            counts += self.counts[(chunk >> 48) as u8 as usize];
-            counts += self.counts[(chunk >> 56) as u8 as usize];
-            counts += self.counts[(chunk >> 64) as u8 as usize];
-            counts += self.counts[(chunk >> 72) as u8 as usize];
-            counts += self.counts[(chunk >> 80) as u8 as usize];
-            counts += self.counts[(chunk >> 88) as u8 as usize];
-            counts += self.counts[(chunk >> 96) as u8 as usize];
-            counts += self.counts[(chunk >> 104) as u8 as usize];
-            counts += self.counts[(chunk >> 112) as u8 as usize];
-            counts += self.counts[(chunk >> 120) as u8 as usize];
+            let chunk = chunk;
+            // Black_box to prevent SIMD (gather is slow..).
+            counts += black_box(self.counts[(chunk >> 0) as u8 as usize]);
+            counts += black_box(self.counts[(chunk >> 8) as u8 as usize]);
+            counts += black_box(self.counts[(chunk >> 16) as u8 as usize]);
+            counts += black_box(self.counts[(chunk >> 24) as u8 as usize]);
+            counts += black_box(self.counts[(chunk >> 32) as u8 as usize]);
+            counts += black_box(self.counts[(chunk >> 40) as u8 as usize]);
+            counts += black_box(self.counts[(chunk >> 48) as u8 as usize]);
+            counts += black_box(self.counts[(chunk >> 56) as u8 as usize]);
+            counts += black_box(self.counts[(chunk >> 64) as u8 as usize]);
+            counts += black_box(self.counts[(chunk >> 72) as u8 as usize]);
+            counts += black_box(self.counts[(chunk >> 80) as u8 as usize]);
+            counts += black_box(self.counts[(chunk >> 88) as u8 as usize]);
+            counts += black_box(self.counts[(chunk >> 96) as u8 as usize]);
+            counts += black_box(self.counts[(chunk >> 104) as u8 as usize]);
+            counts += black_box(self.counts[(chunk >> 112) as u8 as usize]);
+            counts += black_box(self.counts[(chunk >> 120) as u8 as usize]);
         }
         for c in 0..4 {
             ranks[c] += (counts >> (8 * c)) as u8 as u32;
