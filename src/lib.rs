@@ -755,6 +755,20 @@ fn init_counts() -> [u32; 256] {
     counts
 }
 
+/// Each 128bit contains 16 u8 with two counts:
+/// - the first element has 2 4bit counts of A and C,
+/// - the second element has 2 4bit counts of G and T.
+fn init_nibble_counts() -> [std::simd::u8x32; 2] {
+    let mut counts = [[0u8; 16]; 2];
+    for b in 0..16 {
+        let bb = (b | (b << 4)) as u8;
+        for c in 0..4 {
+            counts[c / 2][b] += ((count_u8(bb, c as u8) / 2 as u32) as u8) << ((c & 1) * 4);
+        }
+    }
+    counts.map(|arr| unsafe { std::mem::transmute([arr, arr]) })
+}
+
 /// For each 128bp, store:
 /// - u8 offsets
 /// - 3 u64 counts for c=1,2,3
@@ -1218,6 +1232,232 @@ impl BwaRank3 {
 
         // Fix count for 0.
         let extra_counted = 64 - half_pos;
+        ranks[0] -= extra_counted as u32;
+
+        ranks
+    }
+}
+
+/// v4: rank for each u64 quart, instead of each u128 half
+#[repr(C)]
+#[repr(align(64))]
+#[derive(mem_dbg::MemSize)]
+pub struct BwaBlock4 {
+    /// 32bit counts for the entire block
+    ranks: [u32; 4],
+    /// Each u32 is equivalent to [u8; 4] with counts from start to each u64 quart.
+    part_ranks: [u32; 4],
+    /// 4*64 = 32*8 = 256 bit packed sequence
+    seq: [u8; 32],
+}
+
+/// Store 4 u32 counts every 128bp = 256bits.
+// #[derive(mem_dbg::MemSize)]
+pub struct BwaRank4 {
+    n: usize,
+    blocks: Vec<BwaBlock4>,
+    counts: [u32; 256],
+    masks: [u64; 64],
+}
+
+impl BwaRank4 {
+    pub fn new(seq: &[u8]) -> Self {
+        let n = seq.len();
+        let mut blocks = Vec::with_capacity(seq.len().div_ceil(64));
+        let mut ranks = [0; 4];
+
+        let mut seq = PackedSeqVec::from_ascii(seq).into_raw();
+        seq.resize(seq.capacity(), 0);
+
+        for chunk in seq.as_chunks::<32>().0 {
+            let ranks_start = ranks;
+            let mut part_ranks = [0; 4];
+            let mut block_ranks = [0u32; 4];
+            // count each part half.
+            for (i, chunk) in chunk.as_chunks::<8>().0.iter().enumerate() {
+                for c in 0..4 {
+                    part_ranks[c] |= block_ranks[i] << (i * 8);
+                }
+                for c in 0..4 {
+                    let cnt = count_u8x8(chunk, c) as u32;
+                    ranks[c as usize] += cnt;
+                    block_ranks[c as usize] += cnt;
+                }
+            }
+            blocks.push(BwaBlock4 {
+                ranks: ranks_start,
+                part_ranks,
+                seq: *chunk,
+            });
+        }
+
+        let mut masks = [0u64; 64];
+        for i in 0..32 {
+            let low_bits = i * 2;
+            let mask = if low_bits == 64 {
+                u64::MAX
+            } else {
+                (1u64 << low_bits) - 1
+            };
+            masks[i] = mask;
+        }
+
+        BwaRank4 {
+            n,
+            blocks,
+            counts: init_counts(),
+            masks,
+        }
+    }
+
+    #[inline(always)]
+    pub fn ranks_u64_3(&self, pos: usize) -> Ranks {
+        let chunk_idx = pos / 128;
+        prefetch_index(&self.blocks, chunk_idx);
+        let chunk = &self.blocks[chunk_idx];
+        let chunk_pos = pos % 128;
+        let quart_pos = pos % 32;
+
+        let quart = chunk_pos / 32;
+        let mut ranks = [0; 4];
+
+        // Count chosen quart.
+        {
+            let idx = quart * 8;
+            let chunk = u64::from_le_bytes(chunk.seq[idx..idx + 8].try_into().unwrap());
+            let mask = self.masks[quart_pos];
+            let chunk = chunk & mask;
+            for c in 0..4 {
+                ranks[c as usize] += count_u64(chunk, c);
+            }
+        }
+
+        for c in 0..4 {
+            ranks[c] += chunk.ranks[c];
+        }
+        for c in 0..4 {
+            ranks[c] += (chunk.part_ranks[c] >> (quart * 8)) & 0xff;
+        }
+
+        // Fix count for 0.
+        let extra_counted = 32 - quart_pos;
+        ranks[0] -= extra_counted as u32;
+
+        ranks
+    }
+
+    #[inline(always)]
+    pub fn ranks_bytecount_16_all(&self, pos: usize) -> Ranks {
+        let chunk_idx = pos / 128;
+        prefetch_index(&self.blocks, chunk_idx);
+        let chunk = &self.blocks[chunk_idx];
+        let chunk_pos = pos % 128;
+        let quart_pos = pos % 32;
+
+        let quart = chunk_pos / 32;
+        let mut ranks = [0; 4];
+
+        let mut counts = 0;
+
+        // Count chosen quart.
+        {
+            let idx = quart * 8;
+            let chunk = u64::from_le_bytes(chunk.seq[idx..idx + 8].try_into().unwrap());
+            let mask = self.masks[quart_pos];
+            let chunk = chunk & mask;
+            counts += self.counts[(chunk >> 0) as u8 as usize];
+            counts += self.counts[(chunk >> 8) as u8 as usize];
+            counts += self.counts[(chunk >> 16) as u8 as usize];
+            counts += self.counts[(chunk >> 24) as u8 as usize];
+            counts += self.counts[(chunk >> 32) as u8 as usize];
+            counts += self.counts[(chunk >> 40) as u8 as usize];
+            counts += self.counts[(chunk >> 48) as u8 as usize];
+            counts += self.counts[(chunk >> 56) as u8 as usize];
+        }
+
+        for c in 0..4 {
+            ranks[c] += (counts >> (8 * c)) as u8 as u32;
+        }
+        for c in 0..4 {
+            ranks[c] += chunk.ranks[c];
+        }
+        for c in 0..4 {
+            ranks[c] += (chunk.part_ranks[c] >> (quart * 8)) & 0xff;
+        }
+
+        // Fix count for 0.
+        let extra_counted = 32 - quart_pos;
+        ranks[0] -= extra_counted as u32;
+
+        ranks
+    }
+
+    #[inline(always)]
+    pub fn ranks_simd_popcount(&self, pos: usize) -> Ranks {
+        let chunk_idx = pos / 128;
+        prefetch_index(&self.blocks, chunk_idx);
+        let chunk = &self.blocks[chunk_idx];
+        let chunk_pos = pos % 128;
+        let quart_pos = pos % 32;
+
+        let quart = chunk_pos / 32;
+        let mut ranks = [0; 4];
+
+        // Count chosen quart.
+        {
+            use std::mem::transmute as t;
+
+            // Count the upper or lower half 128 bits.
+            let idx = quart * 8;
+            let mut chunk = u64::from_le_bytes(chunk.seq[idx..idx + 8].try_into().unwrap());
+            let mask = self.masks[quart_pos];
+            chunk &= mask;
+
+            // count AC in first half, GT in second half.
+            let simd = u64x4::splat(chunk);
+            let mask5: u64x4 = unsafe { t(u8x32::splat(0x55)) };
+            let mask3: u64x4 = unsafe { t(u8x32::splat(0x33)) };
+            let mask_f: u64x4 = unsafe { t(u8x32::splat(0x0f)) };
+            let mask_ff: u64x4 = unsafe { t(u16x16::splat(0x00ff)) };
+            // bits of the 4 chars
+            // 00 | 01 | 10 | 11  (0, 1, 2, 3)
+            const C: u64x4 = u64x4::from_array(unsafe {
+                t([[!0u8; 8], [!0x55u8; 8], [!0xAAu8; 8], [!0xFFu8; 8]])
+            });
+
+            let x = simd ^ C;
+            let y = (x & (x >> 1)) & mask5;
+
+            // Go from
+            // c0 c0 | c1 c1
+            // c2 c2 | c3 c3
+            // to: (shuffle)
+            // c0 c2 | c1 c3
+            // c0 c2 | c1 c3
+            // where each value is a u64
+
+            // Now reduce.
+            let sum2 = y;
+            let sum4 = (sum2 & mask3) + ((sum2 >> 2) & mask3);
+            let sum8 = (sum4 & mask_f) + ((sum4 >> 4) & mask_f);
+            let sum16 = sum8 + (sum8 >> 32);
+            // Accumulate the 4 bytes in each u32 using multiplication.
+            let sum64: u32x8 = (unsafe { t::<_, u32x8>(sum16) } * u32x8::splat(0x0101_0101)) >> 24;
+            for c in 0..4 {
+                // ranks[c] += sum64[c] as u8 as u32;
+                ranks[c] += sum64[2 * c] as u8 as u32;
+            }
+        }
+
+        for c in 0..4 {
+            ranks[c] += chunk.ranks[c];
+        }
+        for c in 0..4 {
+            ranks[c] += (chunk.part_ranks[c] >> (quart * 8)) & 0xff;
+        }
+
+        // Fix count for 0.
+        let extra_counted = 32 - quart_pos;
         ranks[0] -= extra_counted as u32;
 
         ranks
