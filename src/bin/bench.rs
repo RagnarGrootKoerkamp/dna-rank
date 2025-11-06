@@ -54,7 +54,7 @@ fn bench_bwa_rank(seq: &[u8], queries: &[usize]) {
     time(&queries, |p| rank.ranks_bytecount_4(p)); // original
     time(&queries, |p| rank.ranks_bytecount_8(p));
     time(&queries, |p| rank.ranks_bytecount_16(p));
-    time(&queries, |p| rank.ranks_bytecount_16_all(p));
+    time(&queries, |p| rank.ranks_bytecount_16_all(p)); // fastest
     eprintln!();
 }
 
@@ -66,6 +66,7 @@ fn bench_bwa2_rank(seq: &[u8], queries: &[usize]) {
     eprint!("{bits:>6.2}b |");
 
     time(&queries, |p| rank.ranks_u128_3(p));
+    time(&queries, |p| rank.ranks_bytecount_16_all(p)); // overall fastest
     eprintln!();
 }
 

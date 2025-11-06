@@ -359,13 +359,11 @@ impl BwaRank {
             }
         }
 
-        let mut counts = [0u32; 256];
-        for b in 0..256 {
-            for c in 0..4 {
-                counts[b] |= (count_u8(b as u8, c) as u32) << (c * 8);
-            }
+        BwaRank {
+            n,
+            blocks,
+            counts: init_counts(),
         }
-        BwaRank { n, blocks, counts }
     }
 
     #[inline(always)]
@@ -738,6 +736,16 @@ impl BwaRank {
     }
 }
 
+fn init_counts() -> [u32; 256] {
+    let mut counts = [0u32; 256];
+    for b in 0..256 {
+        for c in 0..4 {
+            counts[b] |= (count_u8(b as u8, c) as u32) << (c * 8);
+        }
+    }
+    counts
+}
+
 /// For each 128bp, store:
 /// - u8 offsets
 /// - 3 u64 counts for c=1,2,3
@@ -749,8 +757,8 @@ impl BwaRank {
 #[repr(align(64))]
 #[derive(mem_dbg::MemSize)]
 pub struct BwaBlock2 {
-    // meta[1,2,3] = 0
-    // meta[5,6,7] = count of c=1,2,3 in first half (64bp=128bit).
+    // meta[0,1,2,3] = 0
+    // meta[4,5,6,7] = count of c=0,1,2,3 in first half (64bp=128bit).
     meta: [u8; 8],
     // counts for c=1,2,3
     ranks: [u64; 3],
@@ -763,6 +771,7 @@ pub struct BwaBlock2 {
 pub struct BwaRank2 {
     n: usize,
     blocks: Vec<BwaBlock2>,
+    counts: [u32; 256],
 }
 
 impl BwaRank2 {
@@ -778,7 +787,7 @@ impl BwaRank2 {
             let mut meta = [0; 8];
             // count first half.
             for chunk in &chunk.as_chunks::<8>().0[0..2] {
-                for c in 1..4 {
+                for c in 0..4 {
                     meta[4 + c as usize] += count_u8x8(chunk, c) as u8;
                 }
             }
@@ -794,7 +803,11 @@ impl BwaRank2 {
             }
         }
 
-        BwaRank2 { n, blocks }
+        BwaRank2 {
+            n,
+            blocks,
+            counts: init_counts(),
+        }
     }
 
     #[inline(always)]
@@ -832,6 +845,59 @@ impl BwaRank2 {
         // Fix count for 0.
         ranks[0] = pos as u32 - ranks[1] - ranks[2] - ranks[3];
 
+        ranks
+    }
+
+    #[inline(always)]
+    pub fn ranks_bytecount_16_all(&self, pos: usize) -> Ranks {
+        let chunk_idx = pos / 128;
+        prefetch_index(&self.blocks, chunk_idx);
+        let chunk = &self.blocks[chunk_idx];
+        let mut ranks = [0; 4];
+        let chunk_pos = pos % 128;
+
+        // 0 or 1 for left or right half
+        let half = chunk_pos / 64;
+
+        // Offset of chunk and half.
+        for c in 1..4 {
+            ranks[c] += chunk.ranks[c - 1] as u32;
+        }
+
+        let mut counts = u32::from_le_bytes(chunk.meta.as_chunks::<4>().0[half]);
+
+        {
+            // Count the upper or lower half 128 bits.
+            let idx = half * 16;
+            let chunk = u128::from_le_bytes(chunk.seq[idx..idx + 16].try_into().unwrap());
+            let low_bits = chunk_pos.saturating_sub(idx * 4).min(64) * 2;
+            let mask = if low_bits == 128 {
+                u128::MAX
+            } else {
+                (1u128 << low_bits) - 1
+            };
+            let chunk = chunk & mask;
+            counts += self.counts[(chunk >> 0) as u8 as usize];
+            counts += self.counts[(chunk >> 8) as u8 as usize];
+            counts += self.counts[(chunk >> 16) as u8 as usize];
+            counts += self.counts[(chunk >> 24) as u8 as usize];
+            counts += self.counts[(chunk >> 32) as u8 as usize];
+            counts += self.counts[(chunk >> 40) as u8 as usize];
+            counts += self.counts[(chunk >> 48) as u8 as usize];
+            counts += self.counts[(chunk >> 56) as u8 as usize];
+            counts += self.counts[(chunk >> 64) as u8 as usize];
+            counts += self.counts[(chunk >> 72) as u8 as usize];
+            counts += self.counts[(chunk >> 80) as u8 as usize];
+            counts += self.counts[(chunk >> 88) as u8 as usize];
+            counts += self.counts[(chunk >> 96) as u8 as usize];
+            counts += self.counts[(chunk >> 104) as u8 as usize];
+            counts += self.counts[(chunk >> 112) as u8 as usize];
+            counts += self.counts[(chunk >> 120) as u8 as usize];
+        }
+        for c in 0..4 {
+            ranks[c] += (counts >> (8 * c)) as u8 as u32;
+        }
+        ranks[0] = pos as u32 - ranks[1] - ranks[2] - ranks[3];
         ranks
     }
 }
