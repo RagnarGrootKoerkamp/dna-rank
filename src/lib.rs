@@ -3,6 +3,7 @@
 use std::{
     arch::x86_64::{_mm256_shuffle_pd, _mm256_unpackhi_epi64, _mm256_unpacklo_epi64},
     hint::black_box,
+    mem::transmute,
     simd::{u16x16, u32x8, u64x4, u8x32},
 };
 
@@ -1011,6 +1012,7 @@ pub struct BwaRank3 {
     n: usize,
     blocks: Vec<BwaBlock3>,
     counts: [u32; 256],
+    masks: [[u64; 2]; 64],
 }
 
 impl BwaRank3 {
@@ -1042,10 +1044,22 @@ impl BwaRank3 {
             }
         }
 
+        let mut masks = [[0u64; 2]; 64];
+        for i in 0..64 {
+            let low_bits = i * 2;
+            let mask = if low_bits == 128 {
+                u128::MAX
+            } else {
+                (1u128 << low_bits) - 1
+            };
+            masks[i] = unsafe { std::mem::transmute(mask) };
+        }
+
         BwaRank3 {
             n,
             blocks,
             counts: init_counts(),
+            masks,
         }
     }
 
@@ -1055,6 +1069,7 @@ impl BwaRank3 {
         prefetch_index(&self.blocks, chunk_idx);
         let chunk = &self.blocks[chunk_idx];
         let chunk_pos = pos % 128;
+        let half_pos = pos % 64;
 
         // 0 or 1 for left or right half
         let half = chunk_pos / 64;
@@ -1064,14 +1079,9 @@ impl BwaRank3 {
         {
             let idx = half * 16;
             let chunk = u128::from_le_bytes(chunk.seq[idx..idx + 16].try_into().unwrap());
-            let low_bits = (chunk_pos - idx * 4).min(64) * 2;
-            let mask = if low_bits == 128 {
-                u128::MAX
-            } else {
-                (1u128 << low_bits) - 1
-            };
+            let mask: u128 = unsafe { transmute(self.masks[half_pos]) };
             let chunk = chunk & mask;
-            for c in 1..4 {
+            for c in 0..4 {
                 ranks[c as usize] += count_u128(chunk, c);
             }
         }
@@ -1081,7 +1091,7 @@ impl BwaRank3 {
         }
 
         // Fix count for 0.
-        let extra_counted = 64 - chunk_pos;
+        let extra_counted = 64 - half_pos;
         ranks[0] -= extra_counted as u32;
 
         ranks
@@ -1093,6 +1103,7 @@ impl BwaRank3 {
         prefetch_index(&self.blocks, chunk_idx);
         let chunk = &self.blocks[chunk_idx];
         let chunk_pos = pos % 128;
+        let half_pos = pos % 64;
 
         // 0 or 1 for left or right half
         let half = chunk_pos / 64;
@@ -1104,12 +1115,7 @@ impl BwaRank3 {
             // Count the upper or lower half 128 bits.
             let idx = half * 16;
             let chunk = u128::from_le_bytes(chunk.seq[idx..idx + 16].try_into().unwrap());
-            let low_bits = chunk_pos.saturating_sub(idx * 4).min(64) * 2;
-            let mask = if low_bits == 128 {
-                u128::MAX
-            } else {
-                (1u128 << low_bits) - 1
-            };
+            let mask: u128 = unsafe { transmute(self.masks[half_pos]) };
             let chunk = chunk & mask;
             counts += self.counts[(chunk >> 0) as u8 as usize];
             counts += self.counts[(chunk >> 8) as u8 as usize];
@@ -1132,12 +1138,12 @@ impl BwaRank3 {
         for c in 0..4 {
             ranks[c] += chunk.ranks[half][c];
         }
-        for c in 1..4 {
+        for c in 0..4 {
             ranks[c] += (counts >> (8 * c)) as u8 as u32;
         }
 
         // Fix count for 0.
-        let extra_counted = 64 - chunk_pos;
+        let extra_counted = 64 - half_pos;
         ranks[0] -= extra_counted as u32;
 
         ranks
@@ -1149,6 +1155,7 @@ impl BwaRank3 {
         prefetch_index(&self.blocks, chunk_idx);
         let chunk = &self.blocks[chunk_idx];
         let chunk_pos = pos % 128;
+        let half_pos = pos % 64;
 
         // 0 or 1 for left or right half
         let half = chunk_pos / 64;
@@ -1161,10 +1168,7 @@ impl BwaRank3 {
             // Count the upper or lower half 128 bits.
             let idx = half * 16;
             let chunk = u128::from_le_bytes(chunk.seq[idx..idx + 16].try_into().unwrap());
-            let low_bits1 = chunk_pos.saturating_sub(idx * 4).min(32) * 2;
-            let low_bits2 = chunk_pos.saturating_sub(idx * 4 + 32).min(32) * 2;
-            let mask0 = u64::MAX >> (64 - low_bits1);
-            let mask1 = u64::MAX >> (64 - low_bits2);
+            let [mask0, mask1] = self.masks[half_pos];
             let mut chunk: [u64; 2] = unsafe { t(chunk) };
             chunk[0] &= mask0;
             chunk[1] &= mask1;
@@ -1213,7 +1217,7 @@ impl BwaRank3 {
         }
 
         // Fix count for 0.
-        let extra_counted = 64 - chunk_pos;
+        let extra_counted = 64 - half_pos;
         ranks[0] -= extra_counted as u32;
 
         ranks
