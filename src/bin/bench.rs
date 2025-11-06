@@ -37,6 +37,7 @@ where
     time(&queries, |p| rank.ranks_naive(p));
     time(&queries, |p| rank.ranks_u64(p));
     time(&queries, |p| rank.ranks_u64_prefetch(p));
+    time(&queries, |p| rank.ranks_u64_prefetch_all(p));
     time(&queries, |p| rank.ranks_u128(p));
     eprintln!();
 }

@@ -23,7 +23,7 @@ impl<const STRIDE: usize> DnaRank<STRIDE> {
 
         let n = seq.len();
         let mut seq = PackedSeqVec::from_ascii(seq).into_raw();
-        seq.resize(seq.capacity(), 0);
+        seq.extend_from_slice(&vec![0; 128]); // padding
 
         for chunk in seq.as_chunks::<{ STRIDE / 4 }>().0 {
             for chunk in chunk.as_chunks::<8>().0 {
@@ -108,6 +108,35 @@ impl<const STRIDE: usize> DnaRank<STRIDE> {
             ranks[c] += self.counts[chunk_idx][c];
         }
         let extra_counted = (32 - pos) % 32;
+        ranks[0] -= extra_counted as u32;
+
+        ranks
+    }
+
+    // Prefetch the ranks, and only read them after scanning.
+    pub fn ranks_u64_prefetch_all(&self, pos: usize) -> Ranks {
+        let chunk_idx = pos / STRIDE;
+        let byte_idx = chunk_idx * (STRIDE / 4);
+        prefetch_index(&self.counts, chunk_idx);
+        let mut ranks = [0; 4];
+
+        for idx in (byte_idx..(chunk_idx + 1) * (STRIDE / 4)).step_by(8) {
+            let chunk = u64::from_le_bytes(self.seq[idx..idx + 8].try_into().unwrap());
+            let low_bits = pos.saturating_sub(idx * 4).min(32) * 2;
+            let mask = if low_bits == 64 {
+                u64::MAX
+            } else {
+                (1u64 << low_bits) - 1
+            };
+            let chunk = chunk & mask;
+            for c in 0..4 {
+                ranks[c as usize] += count_u64(chunk, c);
+            }
+        }
+        for c in 0..4 {
+            ranks[c] += self.counts[chunk_idx][c];
+        }
+        let extra_counted = STRIDE - pos % STRIDE;
         ranks[0] -= extra_counted as u32;
 
         ranks
@@ -207,6 +236,8 @@ pub(crate) fn prefetch_index<T>(s: &[T], index: usize) {
 /// - 4 u64 counts, for 256bits total
 /// - 256 bits of packed sequence.
 /// In total, exactly covers a 512bit cache line.
+///
+/// Based on BWA: https://github.com/lh3/bwa/blob/master/bwtindex.c#L150
 #[repr(C)]
 #[repr(align(64))]
 #[derive(mem_dbg::MemSize)]
@@ -250,6 +281,7 @@ impl BwaRank {
 
     pub fn ranks_u64(&self, pos: usize) -> Ranks {
         let chunk_idx = pos / 128;
+        prefetch_index(&self.blocks, chunk_idx);
         let chunk = &self.blocks[chunk_idx];
         let mut ranks = [0; 4];
         let pos = pos % 128;
@@ -277,6 +309,7 @@ impl BwaRank {
 
     pub fn ranks_u128(&self, pos: usize) -> Ranks {
         let chunk_idx = pos / 128;
+        prefetch_index(&self.blocks, chunk_idx);
         let chunk = &self.blocks[chunk_idx];
         let mut ranks = [0; 4];
         let pos = pos % 128;
@@ -304,6 +337,7 @@ impl BwaRank {
 
     pub fn ranks_u64_all(&self, pos: usize) -> Ranks {
         let chunk_idx = pos / 128;
+        prefetch_index(&self.blocks, chunk_idx);
         let chunk = &self.blocks[chunk_idx];
         let mut ranks = [0; 4];
         let pos = pos % 128;
@@ -331,6 +365,7 @@ impl BwaRank {
 
     pub fn ranks_u128_all(&self, pos: usize) -> Ranks {
         let chunk_idx = pos / 128;
+        prefetch_index(&self.blocks, chunk_idx);
         let chunk = &self.blocks[chunk_idx];
         let mut ranks = [0; 4];
         let pos = pos % 128;
