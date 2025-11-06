@@ -7,6 +7,7 @@ use std::{
     task::Context,
 };
 
+use cassette::Cassette;
 use dna_rank::{BwaRank, BwaRank2, BwaRank3, BwaRank4, DnaRank, Ranks};
 use futures::{future::join_all, stream::FuturesOrdered, task::noop_waker_ref};
 use mem_dbg::MemSize;
@@ -203,6 +204,59 @@ where
     eprint!(" {ns:>5.1}",);
 }
 
+fn time_async_cassette<F>(queries: &[usize], _lookahead: usize, f: impl Fn(usize) -> F)
+where
+    F: Future<Output = Ranks>,
+{
+    let start = std::time::Instant::now();
+
+    let future = core::pin::pin!(async {
+        for batch in queries.as_chunks::<8>().0 {
+            let mut futures: Pin<_> = std::pin::pin!([
+                f(batch[0]),
+                f(batch[1]),
+                f(batch[2]),
+                f(batch[3]),
+                f(batch[4]),
+                f(batch[5]),
+                f(batch[6]),
+                f(batch[7]),
+            ]);
+
+            for mut f in iter_pin_mut(futures.as_mut()) {
+                poll_fn(|cx| {
+                    // eprintln!("First poll");
+                    let r = f.as_mut().poll(cx);
+                    assert!(r.is_pending());
+                    std::task::Poll::Ready(())
+                })
+                .await;
+            }
+
+            for mut f in iter_pin_mut(futures.as_mut()) {
+                poll_fn(|cx| {
+                    // eprintln!("Second poll");
+                    let r = f.as_mut().poll(cx);
+                    assert!(r.is_ready());
+                    r
+                })
+                .await;
+            }
+        }
+    });
+
+    let mut cm = Cassette::new(future);
+
+    loop {
+        if let Some(()) = cm.poll_on() {
+            break;
+        }
+    }
+
+    let ns = start.elapsed().as_nanos() as f64 / queries.len() as f64;
+    eprint!(" {ns:>5.1}",);
+}
+
 #[inline(never)]
 fn bench_dna_rank<const STRIDE: usize>(seq: &[u8], queries: &[usize])
 where
@@ -315,6 +369,8 @@ fn bench_bwa4_rank(seq: &[u8], queries: &[usize]) {
     // time_async_join_all_batch(&queries, 32, |p| rank.ranks_u64_popcnt_async(p));
     time_async_manual_join_all_batch(&queries, 32, |p| rank.ranks_u64_popcnt_async(p));
     time_async_manual_join_all_batch(&queries, 32, |p| rank.ranks_u64_popcnt_async_nowake(p));
+    time_async_cassette(&queries, 32, |p| rank.ranks_u64_popcnt_async(p));
+    time_async_cassette(&queries, 32, |p| rank.ranks_u64_popcnt_async_nowake(p));
     eprintln!();
 }
 
