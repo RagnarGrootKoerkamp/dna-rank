@@ -1,6 +1,6 @@
 #![allow(incomplete_features)]
 #![feature(generic_const_exprs)]
-use dna_rank::{BwaRank, DnaRank, Ranks};
+use dna_rank::{BwaRank, BwaRank2, DnaRank, Ranks};
 use mem_dbg::MemSize;
 
 #[inline(never)]
@@ -65,9 +65,27 @@ fn bench_bwa_rank(n: usize) {
     eprintln!();
 }
 
+fn bench_bwa2_rank(n: usize) {
+    eprint!("{:<20}:", "BwaRank");
+    let q = 1_000_000;
+    let seq = b"ACGT".repeat(n / 4);
+    let rank = BwaRank2::new(&seq);
+
+    let bits = (rank.mem_size(Default::default()) * 8) as f64 / n as f64;
+    eprint!("{bits:>6.2}b |");
+
+    let queries = (0..q)
+        .map(|_| rand::random_range(0..seq.len()))
+        .collect::<Vec<_>>();
+
+    time(&queries, |p| rank.ranks_u128_3(p));
+    eprintln!();
+}
+
 fn main() {
     for n in [1_000_000, 10_000_000, 100_000_000, 1_000_000_000] {
         eprintln!("n = {}", n);
+        bench_bwa2_rank(n);
         bench_bwa_rank(n);
         bench_dna_rank::<64>(n);
         bench_dna_rank::<128>(n);
