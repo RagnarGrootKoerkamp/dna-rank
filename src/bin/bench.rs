@@ -32,13 +32,14 @@ where
     let bits = (rank.mem_size(Default::default()) * 8) as f64 / seq.len() as f64;
     eprint!("{bits:>6.2}b |");
 
-    time(&queries, |p| rank.ranks_naive(p));
-    time(&queries, |p| rank.ranks_u64(p));
-    time(&queries, |p| rank.ranks_u64_prefetch(p));
-    time(&queries, |p| rank.ranks_u64_prefetch_all(p));
+    // time(&queries, |p| rank.ranks_naive(p));
+    // time(&queries, |p| rank.ranks_u64(p));
+    // time(&queries, |p| rank.ranks_u64_prefetch(p));
+    // time(&queries, |p| rank.ranks_u64_prefetch_all(p));
     time(&queries, |p| rank.ranks_u64_3(p)); // best
-    time(&queries, |p| rank.ranks_u128(p));
-    time(&queries, |p| rank.ranks_u128_3(p));
+
+    // time(&queries, |p| rank.ranks_u128(p));
+    // time(&queries, |p| rank.ranks_u128_3(p));
     eprintln!();
 }
 
@@ -50,17 +51,18 @@ fn bench_bwa_rank(seq: &[u8], queries: &[usize]) {
     let bits = (rank.mem_size(Default::default()) * 8) as f64 / seq.len() as f64;
     eprint!("{bits:>6.2}b |");
 
-    time(&queries, |p| rank.ranks_u64(p));
-    time(&queries, |p| rank.ranks_u64_all(p));
+    // time(&queries, |p| rank.ranks_u64(p));
+    // time(&queries, |p| rank.ranks_u64_all(p));
     time(&queries, |p| rank.ranks_u64_3(p)); // best
-    time(&queries, |p| rank.ranks_u128(p));
-    time(&queries, |p| rank.ranks_u128_3(p)); // 2nd best
-    time(&queries, |p| rank.ranks_u128_all(p));
-    time(&queries, |p| rank.ranks_bytecount(p));
+
+    // time(&queries, |p| rank.ranks_u128(p));
+    // time(&queries, |p| rank.ranks_u128_3(p)); // 2nd best
+    // time(&queries, |p| rank.ranks_u128_all(p));
+    // time(&queries, |p| rank.ranks_bytecount(p));
     time(&queries, |p| rank.ranks_bytecount_4(p)); // original
-    time(&queries, |p| rank.ranks_bytecount_8(p));
+                                                   // time(&queries, |p| rank.ranks_bytecount_8(p));
     time(&queries, |p| rank.ranks_bytecount_16(p));
-    time(&queries, |p| rank.ranks_bytecount_16_all(p)); // fastest
+    time(&queries, |p| rank.ranks_bytecount_16_all(p)); // bad codegen?
     eprintln!();
 }
 
@@ -72,8 +74,8 @@ fn bench_bwa2_rank(seq: &[u8], queries: &[usize]) {
     let bits = (rank.mem_size(Default::default()) * 8) as f64 / seq.len() as f64;
     eprint!("{bits:>6.2}b |");
 
-    time(&queries, |p| rank.ranks_u128_3(p));
-    time(&queries, |p| rank.ranks_bytecount_16_all(p)); // overall fastest
+    time(&queries, |p| rank.ranks_u128_3(p)); // overall fastest
+    time(&queries, |p| rank.ranks_bytecount_16_all(p));
     eprintln!();
 }
 
