@@ -6,7 +6,7 @@ pub fn count_u8x8(word: &[u8; 8], c: u8) -> u32 {
 }
 
 #[inline(always)]
-pub fn count_u8(word: u8, c: u8) -> u32 {
+pub const fn count_u8(word: u8, c: u8) -> u32 {
     // c = 00, 01, 10, 11 = cc
     // scatter = |01|01|01|...
     let scatter = 0x55u8;
