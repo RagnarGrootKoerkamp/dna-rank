@@ -1,8 +1,7 @@
 #![allow(incomplete_features, dead_code)]
 #![feature(generic_const_exprs)]
-use std::{array::from_fn, future::poll_fn, pin::Pin, task::Context};
+use std::{array::from_fn, mem::MaybeUninit, pin::Pin, task::Context};
 
-use cassette::Cassette;
 use dna_rank::{BwaRank, BwaRank2, BwaRank3, BwaRank4, DnaRank, Ranks};
 use futures::{future::join_all, stream::FuturesOrdered, task::noop_waker_ref};
 use mem_dbg::MemSize;
@@ -151,7 +150,11 @@ fn iter_pin_mut<T>(slice: Pin<&mut [T]>) -> impl Iterator<Item = Pin<&mut T>> {
         .iter_mut()
         .map(|t| unsafe { Pin::new_unchecked(t) })
 }
+fn pin_index<T>(slice: Pin<&mut [T]>, index: usize) -> Pin<&mut T> {
+    unsafe { Pin::new_unchecked(&mut slice.get_unchecked_mut()[index]) }
+}
 
+#[inline(always)]
 async fn async_batches<F>(queries: &[usize], f: impl Fn(usize) -> F)
 where
     F: Future<Output = Ranks>,
@@ -168,7 +171,38 @@ where
     }
 }
 
-fn time_async_manual_join_all_batch<F>(queries: &[usize], _lookahead: usize, f: impl Fn(usize) -> F)
+#[inline(always)]
+async fn async_stream<F>(queries: &[usize], f: impl Fn(usize) -> F)
+where
+    F: Future<Output = Ranks>,
+{
+    let mut futures: [MaybeUninit<(usize, F)>; 32] = from_fn(|_| MaybeUninit::uninit());
+    for i in 0..32 {
+        futures[i] = MaybeUninit::new((queries[i], f(queries[i])));
+        let pin = unsafe { Pin::new_unchecked(&mut futures[i].assume_init_mut().1) };
+        assert!(poll_once(pin).await.is_none());
+    }
+
+    for (i, &q) in queries.iter().enumerate() {
+        // finish the old state
+        {
+            let (q, future) = unsafe { futures[i % 32].assume_init_mut() };
+            let pin = unsafe { Pin::new_unchecked(future) };
+            let fq = poll_once(pin).await.unwrap();
+            check(*q, fq);
+        }
+
+        // new future
+        {
+            futures[i % 32] = MaybeUninit::new((q, f(q)));
+            let pin = unsafe { Pin::new_unchecked(&mut futures[i % 32].assume_init_mut().1) };
+            assert!(poll_once(pin).await.is_none());
+        }
+    }
+}
+
+#[inline(always)]
+fn time_async_smol_batch<F>(queries: &[usize], _lookahead: usize, f: impl Fn(usize) -> F)
 where
     F: Future<Output = Ranks>,
 {
@@ -179,12 +213,37 @@ where
     eprint!(" {ns:>5.1}",);
 }
 
-fn time_async_cassette<F>(queries: &[usize], _lookahead: usize, f: impl Fn(usize) -> F)
+#[inline(always)]
+fn time_async_cassette_batch<F>(queries: &[usize], _lookahead: usize, f: impl Fn(usize) -> F)
 where
     F: Future<Output = Ranks>,
 {
     let start = std::time::Instant::now();
     let future = core::pin::pin!(async { async_batches(queries, f).await });
+    cassette::block_on(future);
+    let ns = start.elapsed().as_nanos() as f64 / queries.len() as f64;
+    eprint!(" {ns:>5.1}",);
+}
+
+#[inline(always)]
+fn time_async_smol_stream<F>(queries: &[usize], _lookahead: usize, f: impl Fn(usize) -> F)
+where
+    F: Future<Output = Ranks>,
+{
+    let start = std::time::Instant::now();
+    let local_ex = LocalExecutor::new();
+    smol::future::block_on(local_ex.run(async { async_stream(queries, f).await }));
+    let ns = start.elapsed().as_nanos() as f64 / queries.len() as f64;
+    eprint!(" {ns:>5.1}",);
+}
+
+#[inline(always)]
+fn time_async_cassette_stream<F>(queries: &[usize], _lookahead: usize, f: impl Fn(usize) -> F)
+where
+    F: Future<Output = Ranks>,
+{
+    let start = std::time::Instant::now();
+    let future = core::pin::pin!(async { async_stream(queries, f).await });
     cassette::block_on(future);
     let ns = start.elapsed().as_nanos() as f64 / queries.len() as f64;
     eprint!(" {ns:>5.1}",);
@@ -274,18 +333,19 @@ fn bench_bwa4_rank(seq: &[u8], queries: &[usize]) {
     let bits = 4.0;
     eprint!("{bits:>6.2}b |");
 
-    time(&queries, |p| rank.ranks_u64_popcnt(p));
-    // time(&queries, |p| rank.ranks_bytecount_16_all(p));
-    // time(&queries, |p| rank.ranks_simd_popcount(p));
-    eprint!(" |");
-    time_batch::<32>(&queries, |p| rank.prefetch(p), |p| rank.ranks_u64_popcnt(p));
-    eprint!(" |");
-    time_stream(
-        &queries,
-        32,
-        |p| rank.prefetch(p),
-        |p| rank.ranks_u64_popcnt(p),
-    );
+    // time(&queries, |p| rank.ranks_u64_popcnt(p));
+    // // time(&queries, |p| rank.ranks_bytecount_16_all(p));
+    // // time(&queries, |p| rank.ranks_simd_popcount(p));
+    // eprint!(" |");
+    // time_batch::<32>(&queries, |p| rank.prefetch(p), |p| rank.ranks_u64_popcnt(p));
+    // eprint!(" |");
+    // time_stream(
+    //     &queries,
+    //     32,
+    //     |p| rank.prefetch(p),
+    //     |p| rank.ranks_u64_popcnt(p),
+    // );
+
     // eprint!(" |");
     // time_async_one_task(
     //     &queries,
@@ -300,10 +360,14 @@ fn bench_bwa4_rank(seq: &[u8], queries: &[usize]) {
     // );
     eprint!(" |");
     // time_async_join_all_batch(&queries, 32, |p| rank.ranks_u64_popcnt_async(p));
-    // time_async_manual_join_all_batch(&queries, 32, |p| rank.ranks_u64_popcnt_async(p));
-    // time_async_manual_join_all_batch(&queries, 32, |p| rank.ranks_u64_popcnt_async_nowake(p));
-    // time_async_cassette(&queries, 32, |p| rank.ranks_u64_popcnt_async(p));
-    time_async_cassette(&queries, 32, |p| rank.ranks_u64_popcnt_async_nowake(p));
+    // time_async_smol_batch(&queries, 32, |p| rank.ranks_u64_popcnt_async(p));
+    // time_async_smol_batch(&queries, 32, |p| rank.ranks_u64_popcnt_async_nowake(p));
+    // time_async_cassette_batch(&queries, 32, |p| rank.ranks_u64_popcnt_async(p));
+    time_async_cassette_batch(&queries, 32, |p| rank.ranks_u64_popcnt_async_nowake(p));
+    // time_async_smol_stream(&queries, 32, |p| rank.ranks_u64_popcnt_async(p)); // SLOW
+    // time_async_smol_stream(&queries, 32, |p| rank.ranks_u64_popcnt_async_nowake(p)); // HANGS
+    // time_async_cassette_stream(&queries, 32, |p| rank.ranks_u64_popcnt_async(p));
+    time_async_cassette_stream(&queries, 32, |p| rank.ranks_u64_popcnt_async_nowake(p));
     eprintln!();
 }
 
