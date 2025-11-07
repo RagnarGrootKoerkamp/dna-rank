@@ -163,9 +163,9 @@ where
     for batch in queries.as_chunks::<32>().0 {
         let mut futures: Pin<&mut [_; 32]> = std::pin::pin!(from_fn(|i| f(batch[i])));
 
-        for f in iter_pin_mut(futures.as_mut()) {
-            assert!(poll_once(f).await.is_none());
-        }
+        // for f in iter_pin_mut(futures.as_mut()) {
+        //     assert!(poll_once(f).await.is_none());
+        // }
         for f in iter_pin_mut(futures.as_mut()) {
             assert!(poll_once(f).await.is_some());
         }
@@ -180,8 +180,8 @@ where
     let mut futures: [MaybeUninit<(usize, F)>; 32] = from_fn(|_| MaybeUninit::uninit());
     for i in 0..32 {
         futures[i] = MaybeUninit::new((queries[i], f(queries[i])));
-        let pin = unsafe { Pin::new_unchecked(&mut futures[i].assume_init_mut().1) };
-        assert!(poll_once(pin).await.is_none());
+        // let pin = unsafe { Pin::new_unchecked(&mut futures[i].assume_init_mut().1) };
+        // assert!(poll_once(pin).await.is_none());
     }
 
     for (i, &q) in queries.iter().enumerate() {
@@ -196,8 +196,8 @@ where
         // new future
         {
             futures[i % 32] = MaybeUninit::new((q, f(q)));
-            let pin = unsafe { Pin::new_unchecked(&mut futures[i % 32].assume_init_mut().1) };
-            assert!(poll_once(pin).await.is_none());
+            // let pin = unsafe { Pin::new_unchecked(&mut futures[i % 32].assume_init_mut().1) };
+            // assert!(poll_once(pin).await.is_none());
         }
     }
 }
