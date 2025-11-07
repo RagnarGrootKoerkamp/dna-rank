@@ -1469,6 +1469,7 @@ impl BwaRank4 {
 
     #[inline(always)]
     pub fn ranks_u64_popcnt_async(&self, pos: usize) -> impl Future<Output = Ranks> {
+        #[inline(always)]
         async move {
             let chunk_idx = pos / 128;
             prefetch_index(&self.blocks, chunk_idx);
@@ -1514,6 +1515,7 @@ impl BwaRank4 {
         let chunk_idx = pos / 128;
         prefetch_index(&self.blocks, chunk_idx);
 
+        #[inline(always)]
         async move {
             // Recomputed to reduce the state across the await point.
             let chunk_idx = pos / 128;

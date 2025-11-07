@@ -189,7 +189,7 @@ where
         {
             let (q, future) = unsafe { futures[i % 32].assume_init_mut() };
             let pin = unsafe { Pin::new_unchecked(future) };
-            let fq = poll_once(pin).await.unwrap();
+            let fq = pin.await;
             check(*q, fq);
         }
 
