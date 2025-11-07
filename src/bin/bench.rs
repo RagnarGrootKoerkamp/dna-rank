@@ -252,10 +252,32 @@ where
 }
 
 #[inline(always)]
-fn coro_stream<F>(queries: &[usize], f: impl Fn(usize) -> F)
+fn time_coro_batch<F>(queries: &[usize], _lookahead: usize, f: impl Fn(usize) -> F)
 where
     F: Coroutine<Return = Ranks>,
 {
+    let start = std::time::Instant::now();
+    for batch in queries.as_chunks::<32>().0 {
+        let mut futures: Pin<&mut [_; 32]> = std::pin::pin!(from_fn(|i| f(batch[i])));
+
+        for (q, f) in batch.iter().zip(iter_pin_mut(futures.as_mut())) {
+            let fq = match f.resume(()) {
+                std::ops::CoroutineState::Yielded(_) => panic!(),
+                std::ops::CoroutineState::Complete(fq) => fq,
+            };
+            check(*q, fq);
+        }
+    }
+    let ns = start.elapsed().as_nanos() as f64 / queries.len() as f64;
+    eprint!(" {ns:>5.1}",);
+}
+
+#[inline(always)]
+fn time_coro_stream<F>(queries: &[usize], _lookahead: usize, f: impl Fn(usize) -> F)
+where
+    F: Coroutine<Return = Ranks>,
+{
+    let start = std::time::Instant::now();
     let mut futures: [MaybeUninit<(usize, F)>; 32] = from_fn(|_| MaybeUninit::uninit());
     for i in 0..32 {
         futures[i] = MaybeUninit::new((queries[i], f(queries[i])));
@@ -283,15 +305,6 @@ where
             // assert!(poll_once(pin).await.is_none());
         }
     }
-}
-
-#[inline(always)]
-fn time_coro_stream<F>(queries: &[usize], _lookahead: usize, f: impl Fn(usize) -> F)
-where
-    F: Coroutine<Return = Ranks>,
-{
-    let start = std::time::Instant::now();
-    coro_stream(queries, f);
     let ns = start.elapsed().as_nanos() as f64 / queries.len() as f64;
     eprint!(" {ns:>5.1}",);
 }
@@ -385,7 +398,6 @@ fn bench_bwa4_rank(seq: &[u8], queries: &[usize]) {
     // time(&queries, |p| rank.ranks_simd_popcount(p));
     eprint!(" |");
     time_batch::<32>(&queries, |p| rank.prefetch(p), |p| rank.ranks_u64_popcnt(p));
-    eprint!(" |");
     time_stream(
         &queries,
         32,
@@ -416,6 +428,7 @@ fn bench_bwa4_rank(seq: &[u8], queries: &[usize]) {
     // time_async_cassette_stream(&queries, 32, |p| rank.ranks_u64_popcnt_async(p));
     time_async_cassette_stream(&queries, 32, |p| rank.ranks_u64_popcnt_async_nowake(p));
     eprint!(" |");
+    time_coro_batch(&queries, 32, |p| rank.ranks_u64_popcnt_coro(p));
     time_coro_stream(&queries, 32, |p| rank.ranks_u64_popcnt_coro(p));
     eprintln!();
 }
