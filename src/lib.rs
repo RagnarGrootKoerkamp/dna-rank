@@ -4,7 +4,8 @@
     portable_simd,
     coroutines,
     coroutine_trait,
-    stmt_expr_attributes
+    stmt_expr_attributes,
+    exact_div
 )]
 use std::{
     arch::x86_64::{_mm256_shuffle_pd, _mm256_unpackhi_epi64, _mm256_unpacklo_epi64},
@@ -13,6 +14,8 @@ use std::{
     ops::Coroutine,
     simd::{u8x32, u16x16, u32x8, u64x4},
 };
+
+mod traits;
 
 use packed_seq::{PackedSeqVec, SeqVec};
 use smol::future::yield_now;
@@ -1772,6 +1775,9 @@ impl BwaRank4 {
     }
 }
 
+fn yield_no_wake() -> impl Future<Output = ()> {
+    Yield::new()
+}
 struct Yield(bool);
 impl Yield {
     fn new() -> Self {
