@@ -4,7 +4,7 @@ use crate::{
     Ranks,
     count::{count_u8x8, count_u64},
     count4::{CountFn, MASKS},
-    traits::Block,
+    ranker::Block,
 };
 
 /// For each 128bp, store:

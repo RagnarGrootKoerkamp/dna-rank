@@ -10,7 +10,7 @@ use std::{
 
 use dna_rank::{
     BwaRank, BwaRank2, BwaRank3, BwaRank4, DnaRank, Ranks, blocks::QuartBlock, count4,
-    traits::Ranker,
+    ranker::Ranker,
 };
 use futures::{future::join_all, stream::FuturesOrdered, task::noop_waker_ref};
 use mem_dbg::MemSize;

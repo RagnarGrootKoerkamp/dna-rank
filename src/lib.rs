@@ -18,13 +18,13 @@ use std::{
 pub mod blocks;
 pub mod count;
 pub mod count4;
-pub mod traits;
+pub mod ranker;
 
 use count::*;
 use count4::*;
 use packed_seq::{PackedSeqVec, SeqVec};
+use ranker::prefetch_index;
 use smol::future::yield_now;
-use traits::prefetch_index;
 
 pub type Ranks = [u32; 4];
 
