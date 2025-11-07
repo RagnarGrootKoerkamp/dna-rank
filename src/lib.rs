@@ -1561,14 +1561,56 @@ impl BwaRank4 {
     }
 
     #[inline(always)]
+    pub fn ranks_u64_popcnt_coro2(&self, pos: usize) -> impl Coroutine<Yield = (), Return = Ranks> {
+        #[inline(always)]
+        #[coroutine]
+        move || {
+            let chunk_idx = pos / 128;
+            prefetch_index(&self.blocks, chunk_idx);
+            yield;
+
+            // Recomputed to reduce the state across the await point.
+            let chunk_idx = pos / 128;
+            let chunk = &self.blocks[chunk_idx];
+            let chunk_pos = pos % 128;
+            let quart_pos = pos % 32;
+
+            let quart = chunk_pos / 32;
+            let mut ranks = [0; 4];
+
+            // Count chosen quart.
+            {
+                let idx = quart * 8;
+                let chunk = u64::from_le_bytes(chunk.seq[idx..idx + 8].try_into().unwrap());
+                let mask = self.masks[quart_pos];
+                let chunk = chunk & mask;
+                for c in 0..4 {
+                    ranks[c as usize] += count_u64(chunk, c);
+                }
+            }
+
+            for c in 0..4 {
+                ranks[c] += chunk.ranks[c];
+            }
+            for c in 0..4 {
+                ranks[c] += (chunk.part_ranks[c] >> (quart * 8)) & 0xff;
+            }
+
+            // Fix count for 0.
+            let extra_counted = 32 - quart_pos;
+            ranks[0] -= extra_counted as u32;
+
+            ranks
+        }
+    }
+
+    #[inline(always)]
     pub fn ranks_u64_popcnt_coro(&self, pos: usize) -> impl Coroutine<Yield = (), Return = Ranks> {
         let chunk_idx = pos / 128;
         prefetch_index(&self.blocks, chunk_idx);
         #[inline(always)]
         #[coroutine]
         move || {
-            // Yield::new().await;
-
             // Recomputed to reduce the state across the await point.
             let chunk_idx = pos / 128;
             let chunk = &self.blocks[chunk_idx];
