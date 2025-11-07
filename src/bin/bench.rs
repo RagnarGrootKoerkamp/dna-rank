@@ -189,6 +189,7 @@ where
         {
             let (q, future) = unsafe { futures[i % 32].assume_init_mut() };
             let pin = unsafe { Pin::new_unchecked(future) };
+            // let fq = poll_once(pin).await.unwrap();
             let fq = pin.await;
             check(*q, fq);
         }
@@ -334,18 +335,18 @@ fn bench_bwa4_rank(seq: &[u8], queries: &[usize]) {
     let bits = 4.0;
     eprint!("{bits:>6.2}b |");
 
-    // time(&queries, |p| rank.ranks_u64_popcnt(p));
-    // // time(&queries, |p| rank.ranks_bytecount_16_all(p));
-    // // time(&queries, |p| rank.ranks_simd_popcount(p));
-    // eprint!(" |");
-    // time_batch::<32>(&queries, |p| rank.prefetch(p), |p| rank.ranks_u64_popcnt(p));
-    // eprint!(" |");
-    // time_stream(
-    //     &queries,
-    //     32,
-    //     |p| rank.prefetch(p),
-    //     |p| rank.ranks_u64_popcnt(p),
-    // );
+    time(&queries, |p| rank.ranks_u64_popcnt(p));
+    // time(&queries, |p| rank.ranks_bytecount_16_all(p));
+    // time(&queries, |p| rank.ranks_simd_popcount(p));
+    eprint!(" |");
+    time_batch::<32>(&queries, |p| rank.prefetch(p), |p| rank.ranks_u64_popcnt(p));
+    eprint!(" |");
+    time_stream(
+        &queries,
+        32,
+        |p| rank.prefetch(p),
+        |p| rank.ranks_u64_popcnt(p),
+    );
 
     // eprint!(" |");
     // time_async_one_task(
@@ -398,3 +399,7 @@ fn main() {
         // bench_dna_rank::<128>(&seq, &queries);
     }
 }
+
+// TODO: AsyncIterator => probably not the right framework.
+// TODO: Generators
+// TODO: Coroutines
