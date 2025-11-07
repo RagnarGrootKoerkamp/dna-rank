@@ -292,24 +292,23 @@ where
     F: Coroutine<Return = Ranks> + Unpin,
 {
     let start = std::time::Instant::now();
-    let mut funcs: [(usize, F); 32] = from_fn(|i| {
-        let mut qf = (queries[i], f(queries[i]));
-        pin!(&mut qf.1).resume(());
-        qf
+    let mut funcs: [F; 32] = from_fn(|i| {
+        let mut func = f(queries[i]);
+        pin!(&mut func).resume(());
+        func
     });
 
-    for (i, &q) in queries.iter().enumerate() {
+    for i in 0..queries.len() - 32 {
         // Finish the old fn.
-        let (prev_q, func) = &mut funcs[i % 32];
+        let func = &mut funcs[i % 32];
         let Complete(fq) = pin!(func).resume(()) else {
             panic!()
         };
-        check(*prev_q, fq);
+        check(queries[i], fq);
 
         // Start a new fn.
-        funcs[i % 32] = (q, f(q));
-        let func = &mut funcs[i % 32].1;
-        pin!(func).resume(());
+        funcs[i % 32] = f(queries[i + 32]);
+        pin!(&mut funcs[i % 32]).resume(());
     }
     let ns = start.elapsed().as_nanos() as f64 / queries.len() as f64;
     eprint!(" {ns:>5.1}",);
@@ -341,18 +340,18 @@ where
     F: Coroutine<Return = Ranks> + Unpin,
 {
     let start = std::time::Instant::now();
-    let mut funcs: [(usize, F); 32] = from_fn(|i| (queries[i], f(queries[i])));
+    let mut funcs: [F; 32] = from_fn(|i| f(queries[i]));
 
-    for (i, &q) in queries.iter().enumerate() {
+    for i in 0..queries.len() - 32 {
         // finish the old state
-        let (prev_q, func) = &mut funcs[i % 32];
+        let func = &mut funcs[i % 32];
         let Complete(fq) = pin!(func).resume(()) else {
             panic!()
         };
-        check(*prev_q, fq);
+        check(queries[i], fq);
 
         // new future
-        funcs[i % 32] = (q, f(q));
+        funcs[i % 32] = f(queries[i + 32]);
     }
     let ns = start.elapsed().as_nanos() as f64 / queries.len() as f64;
     eprint!(" {ns:>5.1}",);
