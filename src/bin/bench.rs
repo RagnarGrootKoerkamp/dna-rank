@@ -405,7 +405,7 @@ fn bench_quart<const C3: bool>(seq: &[u8], queries: &QS) {
     //     }
     // });
 
-    time(&queries, |p| ranker.count::<count4::U64Popcnt, C3>(p));
+    // time(&queries, |p| ranker.count::<count4::U64Popcnt, C3>(p));
 
     eprint!(" |");
 
@@ -421,12 +421,12 @@ fn bench_quart<const C3: bool>(seq: &[u8], queries: &QS) {
     //     |p| ranker.prefetch(p),
     //     |p| ranker.count::<count4::ByteLookup8, C3>(p),
     // );
-    // time_stream(
-    //     &queries,
-    //     B,
-    //     |p| ranker.prefetch(p),
-    //     |p| ranker.count::<count4::SimdCount, false>(p),
-    // );
+    time_stream(
+        &queries,
+        B,
+        |p| ranker.prefetch(p),
+        |p| ranker.count::<count4::SimdCount2, false>(p),
+    );
 
     // eprint!(" |");
 
@@ -437,7 +437,7 @@ fn bench_quart<const C3: bool>(seq: &[u8], queries: &QS) {
     //     ranker.count_coro::<count4::ByteLookup8, C3>(p)
     // });
     // time_coro_stream(&queries, B, |p| {
-    //     ranker.count_coro::<count4::SimdCount, false>(p)
+    //     ranker.count_coro::<count4::SimdCount2, false>(p)
     // });
     eprintln!();
 }

@@ -1,7 +1,7 @@
 //! Various methods for counting the number of characters equal to 0,1,2,3.
 
 use std::{
-    arch::x86_64::{_mm256_unpackhi_epi64, _mm256_unpacklo_epi64},
+    arch::x86_64::{_mm256_sad_epu8, _mm256_unpackhi_epi64, _mm256_unpacklo_epi64},
     simd::{u8x32, u32x8, u64x4},
 };
 
@@ -416,7 +416,7 @@ impl CountFn<8> for SimdCount {
         {
             use std::mem::transmute as t;
 
-            // Count the upper or lower half 128 bits.
+            // Count one u64 quarter of bits.
             let mut chunk = u64::from_le_bytes((*data).try_into().unwrap());
             let mask = MASKS[pos];
             chunk &= mask;
@@ -435,24 +435,59 @@ impl CountFn<8> for SimdCount {
             let x = simd ^ C;
             let y = (x & (x >> 1)) & mask5;
 
-            // Go from
-            // c0 c0 | c1 c1
-            // c2 c2 | c3 c3
-            // to: (shuffle)
-            // c0 c2 | c1 c3
-            // c0 c2 | c1 c3
-            // where each value is a u64
-
             // Now reduce.
-            let sum2 = y;
-            let sum4 = (sum2 & mask3) + ((sum2 >> 2) & mask3);
-            let sum8 = (sum4 & mask_f) + ((sum4 >> 4) & mask_f);
-            let sum16 = sum8 + (sum8 >> 32);
+            let sum1 = y;
+            let sum2 = (sum1 & mask3) + ((sum1 >> 2) & mask3);
+            let sum4 = (sum2 & mask_f) + ((sum2 >> 4) & mask_f);
+            let sum8 = sum4 + (sum4 >> 32);
             // Accumulate the 4 bytes in each u32 using multiplication.
-            let sum64: u32x8 = (unsafe { t::<_, u32x8>(sum16) } * u32x8::splat(0x0101_0101)) >> 24;
+            let sum32: u32x8 = (unsafe { t::<_, u32x8>(sum8) } * u32x8::splat(0x0101_0101)) >> 24;
             for c in 0..4 {
                 // ranks[c] += sum64[c] as u8 as u32;
-                ranks[c] += sum64[2 * c] as u8 as u32;
+                ranks[c] += sum32[2 * c] as u8 as u32;
+            }
+        }
+
+        ranks
+    }
+}
+
+pub struct SimdCount2;
+impl CountFn<8> for SimdCount2 {
+    #[inline(always)]
+    fn count(data: &[u8; 8], pos: usize) -> Ranks {
+        let mut ranks = [0; 4];
+        {
+            use std::mem::transmute as t;
+
+            // Count one u64 quarter of bits.
+            let mut chunk = u64::from_le_bytes((*data).try_into().unwrap());
+            let mask = MASKS[pos];
+            chunk &= mask;
+
+            // count AC in first half, GT in second half.
+            let simd = u64x4::splat(chunk);
+            let zero = u8x32::splat(0);
+            let mask5: u64x4 = unsafe { t(u8x32::splat(0x55)) };
+            let mask3: u64x4 = unsafe { t(u8x32::splat(0x33)) };
+            let mask_f: u64x4 = unsafe { t(u8x32::splat(0x0f)) };
+            // bits of the 4 chars
+            // 00 | 01 | 10 | 11  (0, 1, 2, 3)
+            const C: u64x4 = u64x4::from_array(unsafe {
+                t([[!0u8; 8], [!0x55u8; 8], [!0xAAu8; 8], [!0xFFu8; 8]])
+            });
+
+            let x = simd ^ C;
+            let y = (x & (x >> 1)) & mask5;
+
+            // Now reduce.
+            let sum1 = y;
+            let sum2 = (sum1 & mask3) + ((sum1 >> 2) & mask3);
+            let sum4 = (sum2 & mask_f) + ((sum2 >> 4) & mask_f);
+            // Accumulate the 8 bytes in each u64 and write them to the low 16 bits.
+            let sum32: u64x4 = unsafe { t(_mm256_sad_epu8(t(sum4), t(zero))) };
+            for c in 0..4 {
+                ranks[c] += sum32[c] as u32;
             }
         }
 
