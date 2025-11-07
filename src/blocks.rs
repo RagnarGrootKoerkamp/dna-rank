@@ -1,6 +1,11 @@
 #![allow(non_camel_case_types)]
 
-use crate::{Ranks, count::count_u8x8, count4::CountFn, traits::Block};
+use crate::{
+    Ranks,
+    count::{count_u8x8, count_u64},
+    count4::{CountFn, MASKS},
+    traits::Block,
+};
 
 /// For each 128bp, store:
 /// - 4 u64 counts, for 256bits total
@@ -246,5 +251,24 @@ impl Block for QuartBlock {
         }
 
         ranks
+    }
+
+    #[inline(always)]
+    fn count1(&self, pos: usize, c: u8) -> u32 {
+        let mut rank = 0;
+        let chunk_pos = pos % 128;
+
+        let quart = pos / 32;
+        let quart_pos = pos % 32;
+        let idx = quart * 8;
+        let mut chunk = u64::from_le_bytes(self.seq[idx..idx + 8].try_into().unwrap());
+        let mask = MASKS[quart_pos];
+        chunk &= mask;
+        let inner_count = count_u64(chunk, c);
+        rank += inner_count;
+        rank += (self.part_ranks[c as usize] >> (quart * 8)) & 0xff;
+        rank += self.ranks[c as usize];
+
+        rank
     }
 }

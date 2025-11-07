@@ -14,6 +14,9 @@ pub trait Block {
 
     fn new(ranks: Ranks, data: &[u8; Self::B]) -> Self;
     fn count<CF: CountFn<{ Self::C }>, const C3: bool>(&self, pos: usize) -> Ranks;
+    fn count1(&self, pos: usize, c: u8) -> u32 {
+        unimplemented!()
+    }
 }
 
 pub struct Ranker<B: Block> {
@@ -57,6 +60,12 @@ impl<B: Block> Ranker<B> {
         let block_idx = pos / B::N;
         let block_pos = pos % B::N;
         self.blocks[block_idx].count::<CF, C3>(block_pos)
+    }
+    #[inline(always)]
+    pub fn count1(&self, pos: usize, c: u8) -> u32 {
+        let block_idx = pos / B::N;
+        let block_pos = pos % B::N;
+        self.blocks[block_idx].count1(block_pos, c)
     }
     #[inline(always)]
     pub fn count_coro<CF: CountFn<{ B::C }>, const C3: bool>(

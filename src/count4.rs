@@ -339,7 +339,7 @@ impl CountFn<16> for SimdCount {
     }
 }
 
-static MASKS: [u64; 64] = {
+pub static MASKS: [u64; 64] = {
     let mut masks = [0u64; 64];
     let mut i = 0;
     while i < 32 {
