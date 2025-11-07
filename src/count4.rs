@@ -66,17 +66,20 @@ impl CountFn<8> for U64Popcnt {
         let mut ranks = [0; 4];
         {
             let chunk = u64::from_le_bytes((*data).try_into().unwrap());
-            let low_bits = pos * 2;
-            let mask = if low_bits == 64 {
-                u64::MAX
-            } else {
-                (1u64 << low_bits) - 1
-            };
+            let mask = MASKS[pos];
             let chunk = chunk & mask;
+
+            let scatter = 0x5555555555555555u64;
+            let mask = u64x4::from_array(std::array::from_fn(|c| c as u64 * scatter));
+            let chunk = u64x4::splat(chunk);
+            let tmp = chunk ^ mask;
+            let union = (tmp | (tmp >> 1)) & u64x4::splat(scatter);
+
             for c in 0..4 {
-                ranks[c as usize] += count_u64(chunk, c);
+                ranks[c as usize] += 32 - union.as_array()[c].count_ones();
             }
         }
+
         ranks
     }
 }
@@ -390,8 +393,8 @@ impl CountFn<16> for SimdCount {
     }
 }
 
-pub static MASKS: [u64; 64] = {
-    let mut masks = [0u64; 64];
+pub static MASKS: [u64; 32] = {
+    let mut masks = [0u64; 32];
     let mut i = 0;
     while i < 32 {
         let low_bits = i * 2;
