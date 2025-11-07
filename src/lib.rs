@@ -1514,9 +1514,10 @@ impl BwaRank4 {
     pub fn ranks_u64_popcnt_async_nowake(&self, pos: usize) -> impl Future<Output = Ranks> {
         let chunk_idx = pos / 128;
         prefetch_index(&self.blocks, chunk_idx);
-
         #[inline(always)]
         async move {
+            // Yield::new().await;
+
             // Recomputed to reduce the state across the await point.
             let chunk_idx = pos / 128;
             let chunk = &self.blocks[chunk_idx];
@@ -1554,6 +1555,11 @@ impl BwaRank4 {
 }
 
 struct Yield(bool);
+impl Yield {
+    fn new() -> Self {
+        Yield(false)
+    }
+}
 impl Future for Yield {
     type Output = ();
 
