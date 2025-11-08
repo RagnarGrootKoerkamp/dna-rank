@@ -11,6 +11,8 @@ pub trait Block {
     const N: usize;
     /// Bytes of the underlying count function.
     const C: usize;
+    /// Bit-width of the internal global ranks.
+    const W: usize;
 
     fn new(ranks: Ranks, data: &[u8; Self::B]) -> Self;
     /// Count the number of times each character occurs before position `pos`.
@@ -26,28 +28,45 @@ pub struct Ranker<B: Block> {
     /// Cacheline-sized counts.
     blocks: Vec<B>,
     /// Additional counts every 2^31 cachelines.
-    long_ranks: Vec<LongRanks>,
+    long_ranks: Vec<Ranks>,
+    /// Additional counts every 2^31 cachelines.
+    long_ranks2: Vec<LongRanks>,
 }
 
 impl<B: Block> Ranker<B> {
+    /// Store a new long block every this-many blocks.
+    // Each long block should span N*x characters where N*x + N < 2^32, and x is fast to compute.
+    // => x < 2^32 / N - 1
+    const LONG_STRIDE: usize =
+        (((1u128 << B::W) / B::N as u128) as usize - 1).next_power_of_two() / 2;
+
     pub fn new(seq: &[u8]) -> Self
     where
         [(); B::B]:,
     {
-        let n = seq.len();
         let mut packed_seq = PackedSeqVec::from_ascii(seq).into_raw();
+        // Add one block of padding.
         packed_seq.resize(packed_seq.len() + B::B, 0);
 
-        let mut ranks = [0; 4];
-        assert!(B::B.is_power_of_two());
-        let mut long_ranks = Vec::with_capacity(n.div_ceil(1 << 31));
+        let mut ranks = [0u32; 4];
+        let mut l_ranks = [0u64; 4];
+
         let chunks = packed_seq.as_chunks::<{ B::B }>().0;
-        let mut blocks = Vec::with_capacity(chunks.len());
+        let num_chunks = chunks.len();
+        let num_long_chunks = num_chunks.div_ceil(Self::LONG_STRIDE);
+        let mut long_ranks = Vec::with_capacity(num_long_chunks);
+        let mut long_ranks2 = Vec::with_capacity(num_long_chunks);
+        let mut blocks = Vec::with_capacity(num_chunks);
         for (i, chunk) in chunks.iter().enumerate() {
-            blocks.push(B::new(ranks, chunk));
-            if i % (1 << 31) == 0 {
-                long_ranks.push(ranks.map(|x| x as u64));
+            if i % Self::LONG_STRIDE == 0 {
+                for i in 0..4 {
+                    l_ranks[i] += ranks[i] as u64;
+                }
+                long_ranks.push(l_ranks.map(|x| x as u32));
+                long_ranks2.push(l_ranks);
+                ranks = [0; 4];
             }
+            blocks.push(B::new(ranks, chunk));
 
             for chunk in chunk.as_chunks::<8>().0 {
                 for c in 0..4 {
@@ -55,20 +74,36 @@ impl<B: Block> Ranker<B> {
                 }
             }
         }
-        Self { blocks, long_ranks }
+        Self {
+            blocks,
+            long_ranks,
+            long_ranks2,
+        }
     }
     /// Prefetch the cacheline for the given position.
     #[inline(always)]
     pub fn prefetch(&self, pos: usize) {
         let block_idx = pos / B::N;
         prefetch_index(&self.blocks, block_idx);
+        if B::W < 32 {
+            let long_pos = block_idx / Self::LONG_STRIDE;
+            prefetch_index(&self.long_ranks, long_pos);
+        }
     }
     /// Count the number of times each character occurs before position `pos`.
     #[inline(always)]
     pub fn count<CF: CountFn<{ B::C }>, const C3: bool>(&self, pos: usize) -> Ranks {
         let block_idx = pos / B::N;
         let block_pos = pos % B::N;
-        self.blocks[block_idx].count::<CF, C3>(block_pos)
+        let mut ranks = self.blocks[block_idx].count::<CF, C3>(block_pos);
+        if B::W < 32 {
+            let long_pos = block_idx / Self::LONG_STRIDE;
+            let long_ranks = self.long_ranks[long_pos];
+            for c in 0..4 {
+                ranks[c] += long_ranks[c];
+            }
+        }
+        ranks
     }
     /// Count the number of times character `c` occurs before position `pos`.
     #[inline(always)]
@@ -83,7 +118,8 @@ impl<B: Block> Ranker<B> {
         let block_idx = pos / B::N;
         let block_pos = pos % B::N;
         let ranks = self.blocks[block_idx].count::<CF, C3>(block_pos);
-        let long_ranks = self.long_ranks[pos >> 31];
+        let long_pos = block_idx / Self::LONG_STRIDE;
+        let long_ranks = self.long_ranks2[long_pos];
         std::array::from_fn(|i| long_ranks[i] + ranks[i] as u64)
     }
 

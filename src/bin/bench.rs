@@ -2,13 +2,14 @@
 #![feature(generic_const_exprs, coroutines, coroutine_trait, stmt_expr_attributes)]
 use std::{
     array::from_fn,
+    hint::black_box,
     ops::{Coroutine, CoroutineState::Complete},
     pin::pin,
 };
 
 use dna_rank::{
     DnaRank, Ranks,
-    blocks::{FullBlock, QuartBlock},
+    blocks::{FullBlock, PentaBlock, QuartBlock},
     count4,
     ranker::Ranker,
 };
@@ -24,35 +25,35 @@ fn check(pos: usize, ranks: Ranks) {
     );
 }
 
-type QS = [Vec<usize>; 6];
+type QS = [Vec<usize>; 5];
 
-// fn time_fn(queries: &QS, f: impl Fn(&[usize])) {
-//     let mut times: Vec<_> = queries
-//         .iter()
-//         .map(|queries| {
-//             let start = std::time::Instant::now();
-//             f(&queries);
-//             start.elapsed().as_nanos()
-//         })
-//         .collect();
-//     times.sort();
-//     let ns2 = times[2] as f64 / queries[0].len() as f64;
-//     eprint!(" {ns2:>4.1}",);
-// }
-
-fn time_fn(queries: &QS, f: impl Fn(&[usize]) + Sync) {
-    let start = std::time::Instant::now();
-    std::thread::scope(|scope| {
-        queries.iter().for_each(|queries| {
-            let f = &f;
-            scope.spawn(move || {
-                f(queries);
-            });
-        });
-    });
-    let ns = start.elapsed().as_nanos() as f64 / (queries.len() * queries[0].len()) as f64;
-    eprint!(" {ns:>5.2}",);
+fn time_fn(queries: &QS, f: impl Fn(&[usize])) {
+    let mut times: Vec<_> = queries
+        .iter()
+        .map(|queries| {
+            let start = std::time::Instant::now();
+            f(&queries);
+            start.elapsed().as_nanos()
+        })
+        .collect();
+    times.sort();
+    let ns2 = times[2] as f64 / queries[0].len() as f64;
+    eprint!(" {ns2:>4.1}",);
 }
+
+// fn time_fn(queries: &QS, f: impl Fn(&[usize]) + Sync) {
+//     let start = std::time::Instant::now();
+//     std::thread::scope(|scope| {
+//         queries.iter().for_each(|queries| {
+//             let f = &f;
+//             scope.spawn(move || {
+//                 f(queries);
+//             });
+//         });
+//     });
+//     let ns = start.elapsed().as_nanos() as f64 / (queries.len() * queries[0].len()) as f64;
+//     eprint!(" {ns:>5.2}",);
+// }
 
 fn time(queries: &QS, f: impl Fn(usize) -> Ranks + Sync) {
     time_fn(queries, |queries| {
@@ -263,54 +264,6 @@ fn bench_quart<const C3: bool>(seq: &[u8], queries: &QS) {
     // time(&queries, |p| ranker.count::<count4::U64Popcnt, C3>(p));
     time(&queries, |p| ranker.count::<count4::SimdCount7, false>(p));
 
-    // time_stream(
-    //     &queries,
-    //     B,
-    //     |p| ranker.prefetch(p),
-    //     |p| ranker.count::<count4::U64Popcnt, C3>(p),
-    // );
-    // time_stream(
-    //     &queries,
-    //     B,
-    //     |p| ranker.prefetch(p),
-    //     |p| ranker.count::<count4::ByteLookup8, C3>(p),
-    // );
-    // time_stream(
-    //     &queries,
-    //     B,
-    //     |p| ranker.prefetch(p),
-    //     |p| ranker.count::<count4::SimdCount, false>(p),
-    // );
-    // time_stream(
-    //     &queries,
-    //     B,
-    //     |p| ranker.prefetch(p),
-    //     |p| ranker.count::<count4::SimdCount2, false>(p),
-    // );
-    // time_stream(
-    //     &queries,
-    //     B,
-    //     |p| ranker.prefetch(p),
-    //     |p| ranker.count::<count4::SimdCount3, false>(p),
-    // );
-    // time_stream(
-    //     &queries,
-    //     B,
-    //     |p| ranker.prefetch(p),
-    //     |p| ranker.count::<count4::SimdCount4, false>(p),
-    // );
-    // time_stream(
-    //     &queries,
-    //     B,
-    //     |p| ranker.prefetch(p),
-    //     |p| ranker.count::<count4::SimdCount5, false>(p),
-    // );
-    // time_stream(
-    //     &queries,
-    //     B,
-    //     |p| ranker.prefetch(p),
-    //     |p| ranker.count::<count4::SimdCount6, false>(p),
-    // );
     time_stream(
         &queries,
         B,
@@ -334,6 +287,21 @@ fn bench_quart<const C3: bool>(seq: &[u8], queries: &QS) {
         },
     );
 
+    eprint!(" |");
+
+    let ranker = Ranker::<PentaBlock>::new(&seq);
+    let bits = (ranker.mem_size(Default::default()) * 8) as f64 / seq.len() as f64;
+    eprint!("{bits:>6.2}b |");
+
+    time(&queries, |p| ranker.count::<count4::SimdCount7, false>(p));
+
+    time_stream(
+        &queries,
+        B,
+        |p| ranker.prefetch(p),
+        |p| ranker.count::<count4::SimdCount7, false>(p),
+    );
+
     eprintln!();
 
     // time_coro_stream(&queries, B, |p| {
@@ -355,7 +323,7 @@ fn main() {
     #[cfg(not(debug_assertions))]
     let q = 10_000_000;
     #[cfg(not(debug_assertions))]
-    let ns = [100_000, 10_000_000, 1_000_000_000];
+    let ns = [100_000, 10_000_000, 1_000_000_000, 10_000_000_000usize];
 
     for n in ns {
         // for n in [100_000] {
@@ -376,3 +344,5 @@ fn main() {
         // bench_dna_rank::<128>(&seq, &queries);
     }
 }
+
+// TODO: 40bit support
