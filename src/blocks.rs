@@ -354,6 +354,87 @@ impl Block for PentaBlock {
     }
 }
 
+/// As PentaBlock, but part_ranks are 'inlined' with ranks
+#[repr(C)]
+#[repr(align(64))]
+#[derive(mem_dbg::MemSize)]
+pub struct PentaBlock20bit {
+    /// for each char, a packed u48:
+    /// - 20bit count for the global offset (in the low bits)
+    /// - u28 = [u7;2] cumulative counts for first 4 of 5 u64 parts.
+    ranks: [u8; 24],
+    // u64x5 = u8x40 = 320 bit packed sequence
+    seq: [u8; 40],
+}
+
+impl Block for PentaBlock20bit {
+    const B: usize = 40;
+    const N: usize = 160;
+    const C: usize = 8;
+    const W: usize = 20;
+
+    fn new(ranks: Ranks, data: &[u8; Self::B]) -> Self {
+        let mut part_ranks = [0u32; 4];
+        let mut block_ranks = [0u32; 4];
+        // count each part half.
+        for (i, chunk) in data.as_chunks::<8>().0.iter().enumerate() {
+            for c in 0..4 {
+                block_ranks[c as usize] += count_u8x8(chunk, c);
+            }
+            for c in 0..4 {
+                if i < 4 {
+                    assert!(
+                        block_ranks[c] < 128,
+                        "part rank overflow c={c} i={i} {} data = {data:?}",
+                        block_ranks[c]
+                    );
+                    part_ranks[c] |= block_ranks[c].unbounded_shl(32 - 7 * (i + 1) as u32);
+                }
+            }
+        }
+        let mut packed_ranks = [0u8; 24];
+        for c in 0..4 {
+            let value = (ranks[c] as u64 & ((1 << 20) - 1)) + ((part_ranks[c] as u64) << 16);
+            let bytes = value.to_le_bytes();
+            let bytes = &bytes[0..6];
+            packed_ranks[c * 6..c * 6 + 6].copy_from_slice(bytes);
+        }
+
+        PentaBlock20bit {
+            ranks: packed_ranks,
+            seq: *data,
+        }
+    }
+
+    #[inline(always)]
+    fn count<C: CountFn<8>, const C3: bool>(&self, pos: usize) -> Ranks {
+        let mut ranks = [0; 4];
+
+        let pent = pos / 32;
+        let pent_pos = pos % 32;
+
+        let idx = pent * 8;
+        let inner_counts = C::count(&self.seq[idx..idx + 8].try_into().unwrap(), pent_pos);
+        for c in 0..4 {
+            ranks[c] += inner_counts[c];
+        }
+
+        if C3 {
+            ranks[0] = pent_pos as u32 - ranks[1] - ranks[2] - ranks[3];
+        } else {
+            ranks[0] -= extra_counted::<_, C>(pos);
+        }
+
+        for c in 0..4 {
+            let val = u64::from_le_bytes(self.ranks[c * 6..c * 6 + 8].try_into().unwrap());
+            ranks[c] += ((val >> 16) & ((1 << 20) - 1)) as u32;
+            ranks[c] += (val.unbounded_shr(64 - 7 * pent as u32)) as u32 & 0x7f;
+        }
+
+        ranks
+    }
+}
+
 /// u16 global ranks, and a u16 encoding offsets for 2 of the 3 u128 parts.
 #[repr(C)]
 #[repr(align(64))]

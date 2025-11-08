@@ -46,7 +46,7 @@ impl<B: Block> Ranker<B> {
     {
         let mut packed_seq = PackedSeqVec::from_ascii(seq).into_raw();
         // Add one block of padding.
-        packed_seq.resize(packed_seq.len() + B::B, 0);
+        packed_seq.resize(packed_seq.len() + 2 * B::B, 0);
 
         let mut ranks = [0u32; 4];
         let mut l_ranks = [0u64; 4];
