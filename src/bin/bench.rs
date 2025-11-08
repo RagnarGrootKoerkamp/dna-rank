@@ -2,10 +2,8 @@
 #![feature(generic_const_exprs, coroutines, coroutine_trait, stmt_expr_attributes)]
 use std::{
     array::from_fn,
-    mem::MaybeUninit,
     ops::{Coroutine, CoroutineState::Complete},
-    pin::{Pin, pin},
-    task::Context,
+    pin::pin,
 };
 
 use dna_rank::{
@@ -14,9 +12,7 @@ use dna_rank::{
     count4,
     ranker::Ranker,
 };
-use futures::{future::join_all, stream::FuturesOrdered, task::noop_waker_ref};
 use mem_dbg::MemSize;
-use smol::{LocalExecutor, future::poll_once, stream::StreamExt};
 use sux::{bits::BitVec, traits::Rank};
 
 fn check(pos: usize, ranks: Ranks) {
@@ -95,188 +91,6 @@ fn time_stream(
             prefetch(ahead);
             check(q, f(q));
         }
-    });
-}
-
-fn time_async_one_task<F>(queries: &QS, _lookahead: usize, f: impl Fn(usize) -> F + Sync)
-where
-    F: Future<Output = Ranks>,
-{
-    time_fn(queries, |queries| {
-        let local_ex = LocalExecutor::new();
-
-        smol::future::block_on(local_ex.run(async {
-            let mut handles: [_; 32] = from_fn(
-                #[inline(always)]
-                |i| (queries[i], f(queries[i])),
-            );
-            for (i, &q) in queries[32..].iter().enumerate() {
-                let newhandle = f(q);
-
-                let (q, handle) = std::mem::replace(&mut handles[i % 32], (q, newhandle));
-                let fq = handle.await;
-                check(q, fq);
-            }
-            // for (q, handle) in handles {
-            //     let fq = handle.await;
-            //     check(q, fq);
-            // }
-        }));
-    });
-}
-
-fn time_async_futures_ordered<F>(queries: &QS, _lookahead: usize, f: impl Fn(usize) -> F + Sync)
-where
-    F: Future<Output = Ranks>,
-{
-    time_fn(queries, |queries| {
-        let local_ex = LocalExecutor::new();
-
-        smol::future::block_on(local_ex.run(async {
-            let cx = &mut Context::from_waker(noop_waker_ref());
-            for batch in queries.as_chunks::<32>().0 {
-                let mut futures: FuturesOrdered<_> = batch.iter().map(|&q| f(q)).collect();
-
-                for &q in batch {
-                    let fq = loop {
-                        match futures.poll_next(cx) {
-                            std::task::Poll::Ready(fq) => break fq.unwrap(),
-                            std::task::Poll::Pending => continue,
-                        }
-                    };
-                    check(q, fq);
-                }
-            }
-        }));
-    });
-}
-
-fn time_async_join_all_batch<F>(queries: &QS, _lookahead: usize, f: impl Fn(usize) -> F + Sync)
-where
-    F: Future<Output = Ranks>,
-{
-    time_fn(queries, |queries| {
-        let local_ex = LocalExecutor::new();
-
-        smol::future::block_on(local_ex.run(async {
-            for batch in queries.as_chunks::<16>().0 {
-                let futures = batch.iter().map(|&q| f(q));
-                // NOTE: This needs batches of size <30 to avoid switching to a heavy implementation.
-                for (&q, fq) in batch.iter().zip(join_all(futures).await) {
-                    check(q, fq);
-                }
-            }
-        }));
-    });
-}
-
-/// copied from futures crate
-fn iter_pin_mut<T>(slice: Pin<&mut [T]>) -> impl Iterator<Item = Pin<&mut T>> {
-    // Safety: `std` _could_ make this unsound if it were to decide Pin's
-    // invariants aren't required to transmit through slices. Otherwise this has
-    // the same safety as a normal field pin projection.
-    unsafe { slice.get_unchecked_mut() }
-        .iter_mut()
-        .map(|t| unsafe { Pin::new_unchecked(t) })
-}
-fn pin_index<T>(slice: Pin<&mut [T]>, index: usize) -> Pin<&mut T> {
-    unsafe { Pin::new_unchecked(&mut slice.get_unchecked_mut()[index]) }
-}
-
-#[inline(always)]
-async fn async_batches<F>(queries: &[usize], f: impl Fn(usize) -> F + Sync)
-where
-    F: Future<Output = Ranks>,
-{
-    // eprintln!("size of future: {}", std::mem::size_of::<F>());
-    for batch in queries.as_chunks::<32>().0 {
-        let mut futures: Pin<&mut [_; 32]> = pin!(from_fn(|i| f(batch[i])));
-
-        // for f in iter_pin_mut(futures.as_mut()) {
-        //     assert!(poll_once(f).await.is_none());
-        // }
-        for f in iter_pin_mut(futures.as_mut()) {
-            assert!(poll_once(f).await.is_some());
-        }
-    }
-}
-
-#[inline(always)]
-async fn async_stream<F>(queries: &[usize], f: impl Fn(usize) -> F + Sync)
-where
-    F: Future<Output = Ranks>,
-{
-    let mut futures: [MaybeUninit<(usize, F)>; 32] = from_fn(|_| MaybeUninit::uninit());
-    for i in 0..32 {
-        futures[i] = MaybeUninit::new((queries[i], f(queries[i])));
-        // let pin = unsafe { Pin::new_unchecked(&mut futures[i].assume_init_mut().1) };
-        // assert!(poll_once(pin).await.is_none());
-    }
-
-    for (i, &q) in queries.iter().enumerate() {
-        // finish the old state
-        {
-            let (q, future) = unsafe { futures[i % 32].assume_init_mut() };
-            let pin = unsafe { Pin::new_unchecked(future) };
-            // let fq = poll_once(pin).await.unwrap();
-            let fq = pin.await;
-            check(*q, fq);
-        }
-
-        // new future
-        {
-            futures[i % 32] = MaybeUninit::new((q, f(q)));
-            // let pin = unsafe { Pin::new_unchecked(&mut futures[i % 32].assume_init_mut().1) };
-            // assert!(poll_once(pin).await.is_none());
-        }
-    }
-}
-
-#[inline(always)]
-fn time_async_smol_batch<F>(queries: &QS, _lookahead: usize, f: impl Fn(usize) -> F + Sync)
-where
-    F: Future<Output = Ranks>,
-{
-    let f = &f;
-    time_fn(queries, |queries| {
-        let local_ex = LocalExecutor::new();
-        smol::future::block_on(local_ex.run(async move { async_batches(queries, f).await }));
-    });
-}
-
-#[inline(always)]
-fn time_async_cassette_batch<F>(queries: &QS, _lookahead: usize, f: impl Fn(usize) -> F + Sync)
-where
-    F: Future<Output = Ranks>,
-{
-    let f = &f;
-    time_fn(queries, |queries| {
-        let future = core::pin::pin!(async { async_batches(queries, f).await });
-        cassette::block_on(future);
-    });
-}
-
-#[inline(always)]
-fn time_async_smol_stream<F>(queries: &QS, _lookahead: usize, f: impl Fn(usize) -> F + Sync)
-where
-    F: Future<Output = Ranks>,
-{
-    let f = &f;
-    time_fn(queries, |queries| {
-        let local_ex = LocalExecutor::new();
-        smol::future::block_on(local_ex.run(async { async_stream(queries, f).await }));
-    });
-}
-
-#[inline(always)]
-fn time_async_cassette_stream<F>(queries: &QS, _lookahead: usize, f: impl Fn(usize) -> F + Sync)
-where
-    F: Future<Output = Ranks>,
-{
-    let f = &f;
-    time_fn(queries, |queries| {
-        let future = core::pin::pin!(async { async_stream(queries, f).await });
-        cassette::block_on(future);
     });
 }
 
