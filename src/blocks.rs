@@ -2,7 +2,7 @@
 
 use crate::{
     Ranks,
-    count::{count_u8x8, count_u64},
+    count::{count_u8x8, count_u8x16, count_u64},
     count4::{CountFn, MASKS},
     ranker::Block,
 };
@@ -284,16 +284,16 @@ impl Block for QuartBlock {
     }
 }
 
-/// u32 global ranks, and 8bit ranks for each u64 quart.
+/// u16 global ranks, and 8bit ranks for 4 of the 5 u64 parts.
 #[repr(C)]
 #[repr(align(64))]
 #[derive(mem_dbg::MemSize)]
 pub struct PentaBlock {
     /// 16it counts for the global offset
     ranks: [u16; 4],
-    /// Each u32 is equivalent to [u8; 4] with counts from start to each u64 quart.
+    /// Each u32 is equivalent to [u8; 4] with counts from start to 4 of 5 u64 parts.
     part_ranks: [u32; 4],
-    // u64x5 = u8x40 = 300 bit packed sequence
+    // u64x5 = u8x40 = 320 bit packed sequence
     seq: [u8; 40],
 }
 
@@ -304,13 +304,12 @@ impl Block for PentaBlock {
     const W: usize = 16;
 
     fn new(ranks: Ranks, data: &[u8; Self::B]) -> Self {
-        let mut part_ranks = [0; 4];
+        let mut part_ranks = [0u32; 4];
         let mut block_ranks = [0u32; 4];
         // count each part half.
         for (i, chunk) in data.as_chunks::<8>().0.iter().enumerate() {
             for c in 0..4 {
-                let cnt = count_u8x8(chunk, c) as u32;
-                block_ranks[c as usize] += cnt;
+                block_ranks[c as usize] += count_u8x8(chunk, c);
             }
             for c in 0..4 {
                 if i < 4 {
@@ -349,6 +348,76 @@ impl Block for PentaBlock {
         }
         for c in 0..4 {
             ranks[c] += (self.part_ranks[c].unbounded_shr(32 - 8 * pent as u32)) & 0xff;
+        }
+
+        ranks
+    }
+}
+
+/// u16 global ranks, and a u16 encoding offsets for 2 of the 3 u128 parts.
+#[repr(C)]
+#[repr(align(64))]
+#[derive(mem_dbg::MemSize)]
+pub struct HexaBlock {
+    /// 16it counts for the global offset
+    ranks: [u16; 4],
+    /// Each u16 is equivalent to [u8; 2] with counts from start to 2 of 3 128 parts.
+    part_ranks: [u16; 4],
+    // u128x3 = u8x48 = 384 bit packed sequence
+    seq: [u8; 48],
+}
+
+impl Block for HexaBlock {
+    const B: usize = 48;
+    const N: usize = 192;
+    const C: usize = 16;
+    const W: usize = 16;
+
+    fn new(ranks: Ranks, data: &[u8; Self::B]) -> Self {
+        let mut part_ranks = [0u16; 4];
+        let mut block_ranks = [0u16; 4];
+        // count each part half.
+        for (i, chunk) in data.as_chunks::<16>().0.iter().enumerate() {
+            for c in 0..4 {
+                block_ranks[c as usize] += count_u8x16(chunk, c) as u16;
+            }
+            for c in 0..4 {
+                if i < 2 {
+                    part_ranks[c] |= block_ranks[c].unbounded_shl(8 - 8 * i as u32);
+                }
+            }
+        }
+        HexaBlock {
+            ranks: ranks.map(|x| x as u16),
+            part_ranks,
+            seq: *data,
+        }
+    }
+
+    #[inline(always)]
+    fn count<C: CountFn<16>, const C3: bool>(&self, pos: usize) -> Ranks {
+        let mut ranks = [0; 4];
+
+        let hex = pos / 64;
+        let hex_pos = pos % 64;
+
+        let idx = hex * 16;
+        let inner_counts = C::count(&self.seq[idx..idx + 16].try_into().unwrap(), hex_pos);
+        for c in 0..4 {
+            ranks[c] += inner_counts[c];
+        }
+
+        if C3 {
+            ranks[0] = hex_pos as u32 - ranks[1] - ranks[2] - ranks[3];
+        } else {
+            ranks[0] -= extra_counted::<_, C>(pos);
+        }
+
+        for c in 0..4 {
+            ranks[c] += self.ranks[c] as u32;
+        }
+        for c in 0..4 {
+            ranks[c] += (self.part_ranks[c].unbounded_shr(16 - 8 * hex as u32)) as u32 & 0xff;
         }
 
         ranks

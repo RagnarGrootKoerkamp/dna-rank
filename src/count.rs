@@ -6,6 +6,11 @@ pub fn count_u8x8(word: &[u8; 8], c: u8) -> u32 {
 }
 
 #[inline(always)]
+pub fn count_u8x16(word: &[u8; 16], c: u8) -> u32 {
+    count_u128(u128::from_le_bytes(*word), c)
+}
+
+#[inline(always)]
 pub const fn count_u8(word: u8, c: u8) -> u32 {
     // c = 00, 01, 10, 11 = cc
     // scatter = |01|01|01|...

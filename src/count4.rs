@@ -365,8 +365,9 @@ impl CountFn<32> for ByteLookup16x2 {
     }
 }
 
-pub struct SimdCount;
-impl CountFn<16> for SimdCount {
+/// Wide, because it counts 128 at a time.
+pub struct WideSimdCount;
+impl CountFn<16> for WideSimdCount {
     const S: usize = 16;
     const FIXED: bool = true;
     #[inline(always)]
