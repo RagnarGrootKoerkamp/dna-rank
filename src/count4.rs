@@ -13,12 +13,20 @@ use crate::{
 };
 
 pub trait CountFn<const B: usize> {
+    /// The number of bytes processed at a time.
+    /// Used to compute the overshoot.
+    const S: usize;
+    /// Fixed: always the entire B-byte input is processed.
+    /// Non-fixed (variable): Only process first pos/B chunks.
+    const FIXED: bool;
     /// Function that can count on B bytes of data.
     fn count(data: &[u8; B], pos: usize) -> Ranks;
 }
 
 pub struct Naive;
 impl<const B: usize> CountFn<B> for Naive {
+    const S: usize = 1;
+    const FIXED: bool = false;
     #[inline(always)]
     fn count(data: &[u8; B], pos: usize) -> Ranks {
         let mut counts = [0u32; 4];
@@ -41,6 +49,8 @@ impl<const B: usize> CountFn<B> for Naive {
 
 pub struct U64PopcntSlice;
 impl<const B: usize> CountFn<B> for U64PopcntSlice {
+    const S: usize = 8;
+    const FIXED: bool = false;
     #[inline(always)]
     fn count(data: &[u8; B], pos: usize) -> Ranks {
         let mut ranks = [0; 4];
@@ -63,6 +73,8 @@ impl<const B: usize> CountFn<B> for U64PopcntSlice {
 
 pub struct U64Popcnt;
 impl CountFn<8> for U64Popcnt {
+    const S: usize = 8;
+    const FIXED: bool = true;
     #[inline(always)]
     fn count(data: &[u8; 8], pos: usize) -> Ranks {
         let mut ranks = [0; 4];
@@ -88,6 +100,8 @@ impl CountFn<8> for U64Popcnt {
 
 pub struct U64Popcnt3;
 impl<const B: usize> CountFn<B> for U64Popcnt3 {
+    const S: usize = 8;
+    const FIXED: bool = false;
     fn count(data: &[u8; B], pos: usize) -> Ranks {
         let mut ranks = [0; 4];
         for idx in (0..pos.div_ceil(4)).step_by(8) {
@@ -109,6 +123,8 @@ impl<const B: usize> CountFn<B> for U64Popcnt3 {
 
 pub struct U128Popcnt;
 impl<const B: usize> CountFn<B> for U128Popcnt {
+    const S: usize = 16;
+    const FIXED: bool = false;
     #[inline(always)]
     fn count(data: &[u8; B], pos: usize) -> Ranks {
         let mut ranks = [0; 4];
@@ -131,6 +147,8 @@ impl<const B: usize> CountFn<B> for U128Popcnt {
 
 pub struct U128Popcnt3;
 impl<const B: usize> CountFn<B> for U128Popcnt3 {
+    const S: usize = 16;
+    const FIXED: bool = false;
     #[inline(always)]
     fn count(data: &[u8; B], pos: usize) -> Ranks {
         let mut ranks = [0; 4];
@@ -166,6 +184,8 @@ pub const BYTE_COUNTS: [u32; 256] = {
 
 pub struct ByteLookup;
 impl<const B: usize> CountFn<B> for ByteLookup {
+    const S: usize = 1;
+    const FIXED: bool = false;
     #[inline(always)]
     fn count(data: &[u8; B], pos: usize) -> Ranks {
         let mut counts: u32 = 0;
@@ -184,6 +204,8 @@ impl<const B: usize> CountFn<B> for ByteLookup {
 
 pub struct ByteLookup4;
 impl<const B: usize> CountFn<B> for ByteLookup4 {
+    const S: usize = 4;
+    const FIXED: bool = false;
     #[inline(always)]
     fn count(data: &[u8; B], pos: usize) -> Ranks {
         let mut counts: u32 = 0;
@@ -205,6 +227,8 @@ impl<const B: usize> CountFn<B> for ByteLookup4 {
 
 pub struct ByteLookup8Slice;
 impl<const B: usize> CountFn<B> for ByteLookup8Slice {
+    const S: usize = 8;
+    const FIXED: bool = false;
     #[inline(always)]
     fn count(data: &[u8; B], pos: usize) -> Ranks {
         let mut counts: u32 = 0;
@@ -234,6 +258,8 @@ impl<const B: usize> CountFn<B> for ByteLookup8Slice {
 
 pub struct ByteLookup8;
 impl CountFn<8> for ByteLookup8 {
+    const S: usize = 8;
+    const FIXED: bool = true;
     #[inline(always)]
     fn count(data: &[u8; 8], pos: usize) -> Ranks {
         let mut counts: u32 = 0;
@@ -263,6 +289,8 @@ impl CountFn<8> for ByteLookup8 {
 
 pub struct ByteLookup16;
 impl<const B: usize> CountFn<B> for ByteLookup16 {
+    const S: usize = 16;
+    const FIXED: bool = false;
     #[inline(always)]
     fn count(data: &[u8; B], pos: usize) -> Ranks {
         let mut counts: u32 = 0;
@@ -300,6 +328,8 @@ impl<const B: usize> CountFn<B> for ByteLookup16 {
 
 pub struct ByteLookup16x2;
 impl CountFn<32> for ByteLookup16x2 {
+    const S: usize = 32;
+    const FIXED: bool = false;
     #[inline(always)]
     fn count(data: &[u8; 32], pos: usize) -> Ranks {
         let mut counts: u32 = 0;
@@ -337,6 +367,8 @@ impl CountFn<32> for ByteLookup16x2 {
 
 pub struct SimdCount;
 impl CountFn<16> for SimdCount {
+    const S: usize = 16;
+    const FIXED: bool = true;
     #[inline(always)]
     fn count(data: &[u8; 16], pos: usize) -> Ranks {
         let mut ranks = [0; 4];
@@ -412,6 +444,8 @@ pub static MASKS: [u64; 32] = {
 };
 
 impl CountFn<8> for SimdCount {
+    const S: usize = 8;
+    const FIXED: bool = true;
     #[inline(always)]
     fn count(data: &[u8; 8], pos: usize) -> Ranks {
         let mut ranks = [0; 4];
@@ -456,6 +490,8 @@ impl CountFn<8> for SimdCount {
 
 pub struct SimdCount2;
 impl CountFn<8> for SimdCount2 {
+    const S: usize = 8;
+    const FIXED: bool = true;
     #[inline(always)]
     fn count(data: &[u8; 8], pos: usize) -> Ranks {
         let mut ranks = [0; 4];
@@ -499,6 +535,8 @@ impl CountFn<8> for SimdCount2 {
 
 pub struct SimdCount3;
 impl CountFn<8> for SimdCount3 {
+    const S: usize = 8;
+    const FIXED: bool = true;
     #[inline(always)]
     fn count(data: &[u8; 8], pos: usize) -> Ranks {
         let mut ranks = [0; 4];
@@ -548,6 +586,8 @@ impl CountFn<8> for SimdCount3 {
 
 pub struct SimdCount4;
 impl CountFn<8> for SimdCount4 {
+    const S: usize = 8;
+    const FIXED: bool = true;
     #[inline(always)]
     fn count(data: &[u8; 8], pos: usize) -> Ranks {
         let mut ranks = [0; 4];
@@ -600,6 +640,8 @@ impl CountFn<8> for SimdCount4 {
 
 pub struct SimdCount5;
 impl CountFn<8> for SimdCount5 {
+    const S: usize = 8;
+    const FIXED: bool = true;
     #[inline(always)]
     fn count(data: &[u8; 8], pos: usize) -> Ranks {
         let mut ranks = [0; 4];
@@ -652,6 +694,8 @@ impl CountFn<8> for SimdCount5 {
 // New: Drop the &mask5 since high bits are 0 anyway.
 pub struct SimdCount6;
 impl CountFn<8> for SimdCount6 {
+    const S: usize = 8;
+    const FIXED: bool = true;
     #[inline(always)]
     fn count(data: &[u8; 8], pos: usize) -> Ranks {
         let mut ranks = [0; 4];
@@ -706,6 +750,8 @@ impl CountFn<8> for SimdCount6 {
 // New: drop the x&(x>>1) and instead lookup nibbles directly
 pub struct SimdCount7;
 impl CountFn<8> for SimdCount7 {
+    const S: usize = 8;
+    const FIXED: bool = true;
     #[inline(always)]
     fn count(data: &[u8; 8], pos: usize) -> Ranks {
         let mut ranks = [0; 4];

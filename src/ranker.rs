@@ -7,7 +7,7 @@ use std::ops::Coroutine;
 pub trait Block {
     /// Number of bytes per block.
     const B: usize;
-    /// Number of charactcrate::{Ranks, count4::CountFn}k.
+    /// Number of characters per block.
     const N: usize;
     /// Bytes of the underlying count function.
     const C: usize;

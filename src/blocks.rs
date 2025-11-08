@@ -23,6 +23,16 @@ pub struct FullBlock {
     seq: [u8; 32],
 }
 
+#[inline(always)]
+fn extra_counted<const B: usize, C: CountFn<B>>(pos: usize) -> u32 {
+    let ans = (if C::FIXED {
+        (C::S * 4) - pos % (C::S * 4)
+    } else {
+        -(pos as isize) as usize % (C::S * 4)
+    }) as u32;
+    ans
+}
+
 impl Block for FullBlock {
     const B: usize = 32; // Bytes of characters in block.
     const N: usize = 128; // Number of characters in block.
@@ -36,13 +46,13 @@ impl Block for FullBlock {
     }
 
     #[inline(always)]
-    fn count<CF: CountFn<{ Self::C }>, const C3: bool>(&self, pos: usize) -> Ranks {
+    fn count<C: CountFn<{ Self::C }>, const C3: bool>(&self, pos: usize) -> Ranks {
         let mut ranks = [0; 4];
         for c in 0..4 {
             ranks[c] += self.ranks[c] as u32;
         }
 
-        let inner_counts = CF::count(&self.seq, pos);
+        let inner_counts = C::count(&self.seq, pos);
         for c in 0..4 {
             ranks[c] += inner_counts[c];
         }
@@ -50,8 +60,7 @@ impl Block for FullBlock {
         if C3 {
             ranks[0] = pos as u32 - ranks[1] - ranks[2] - ranks[3];
         } else {
-            let extra_counted = (4usize.wrapping_sub(pos)) % 4;
-            ranks[0] -= extra_counted as u32;
+            ranks[0] -= extra_counted::<_, C>(pos);
         }
         ranks
     }
@@ -172,8 +181,7 @@ impl Block for HalfBlock2 {
         if C3 {
             ranks[0] = half_pos as u32 - ranks[1] - ranks[2] - ranks[3];
         } else {
-            let extra_counted = (4usize.wrapping_sub(pos)) % 4;
-            ranks[0] -= extra_counted as u32;
+            ranks[0] -= extra_counted::<_, C>(pos);
         }
 
         for c in 0..4 {
@@ -241,8 +249,7 @@ impl Block for QuartBlock {
         if C3 {
             ranks[0] = quart_pos as u32 - ranks[1] - ranks[2] - ranks[3];
         } else {
-            let extra_counted = 32 - quart_pos % 32;
-            ranks[0] -= extra_counted as u32;
+            ranks[0] -= extra_counted::<_, C>(pos);
         }
 
         for c in 0..4 {
