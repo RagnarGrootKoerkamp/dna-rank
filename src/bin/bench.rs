@@ -309,14 +309,14 @@ fn bench_quart<const C3: bool>(seq: &[u8], queries: &QS) {
     eprint!("{bits:>6.2}b |");
 
     time(&queries, |p| {
-        ranker.count::<count4::WideSimdCount, false>(p)
+        ranker.count::<count4::WideSimdCount2, false>(p)
     });
 
     time_stream(
         &queries,
         B,
         |p| ranker.prefetch(p),
-        |p| ranker.count::<count4::WideSimdCount, false>(p),
+        |p| ranker.count::<count4::WideSimdCount2, false>(p),
     );
 
     eprintln!();

@@ -444,7 +444,23 @@ pub static MASKS: [u64; 32] = {
     masks
 };
 
-impl CountFn<8> for SimdCount {
+pub static WIDE_MASKS: [u128; 64] = {
+    let mut masks = [0u128; 64];
+    let mut i = 0;
+    while i < 64 {
+        let low_bits = i * 2;
+        let mask = if low_bits == 128 {
+            u128::MAX
+        } else {
+            (1u128 << low_bits) - 1
+        };
+        masks[i] = mask;
+        i += 1;
+    }
+    masks
+};
+
+impl CountFn<8> for WideSimdCount {
     const S: usize = 8;
     const FIXED: bool = true;
     #[inline(always)]
@@ -792,6 +808,70 @@ impl CountFn<8> for SimdCount7 {
             // no need for mask_f here.
             // Those are needed to get rid of possible 1 high bits that mask the value to 0,
             // but we already know those aren't 0 anyway in our case.
+            let lo = y & mask_f;
+            let hi = (y >> 4) & mask_f;
+            let popcnt1: u8x32 = unsafe { t(_mm256_shuffle_epi8(t(byte_counts), t(lo))) };
+            let popcnt2: u8x32 = unsafe { t(_mm256_shuffle_epi8(t(byte_counts), t(hi))) };
+            let sum4 = popcnt1 + popcnt2;
+            // Accumulate the 8 bytes in each u64 and write them to the low 16 bits.
+            let sum32: u64x4 = unsafe { t(_mm256_sad_epu8(t(sum4), t(zero))) };
+            for c in 0..4 {
+                ranks[c] += sum32[c] as u32;
+            }
+        }
+
+        ranks
+    }
+}
+
+/// Wide variant of SimdCount3.
+/// This interleaves masks for the two u64 halves.
+pub struct WideSimdCount2;
+impl CountFn<16> for WideSimdCount2 {
+    const S: usize = 16;
+    const FIXED: bool = true;
+    #[inline(always)]
+    fn count(data: &[u8; 16], pos: usize) -> Ranks {
+        let mut ranks = [0; 4];
+        {
+            use std::mem::transmute as t;
+
+            // Count one u64 quarter of bits.
+            let mut chunk = u128::from_le_bytes((*data).try_into().unwrap());
+            let mask = WIDE_MASKS[pos];
+            chunk &= mask;
+            let [chunk0, chunk1]: [u64; 2] = unsafe { t(chunk) };
+
+            // count AC in first half, GT in second half.
+            let simd0 = u64x4::splat(chunk0);
+            let simd1 = u64x4::splat(chunk1);
+            let zero = u8x32::splat(0);
+            let mask5: u64x4 = unsafe { t(u8x32::splat(0x55)) };
+            let mask_a: u64x4 = unsafe { t(u8x32::splat(0xaa)) };
+            let mask_f: u64x4 = unsafe { t(u8x32::splat(0x0f)) };
+            // bits of the 4 chars
+            // 00 | 01 | 10 | 11  (0, 1, 2, 3)
+            const C: u64x4 = u64x4::from_array(unsafe {
+                t([[!0u8; 8], [!0x55u8; 8], [!0xAAu8; 8], [!0xFFu8; 8]])
+            });
+
+            let x0 = simd0 ^ C;
+            let y0 = (x0 & (x0 >> 1)) & mask5;
+            // New: make the second mask in the high position of each pair.
+            let x1 = simd1 ^ C;
+            let y1 = (x1 & (x1 << 1)) & mask_a;
+            // New: interleave the two masks.
+            let y = y0 | y1;
+
+            let byte_counts = u8x32::from_array([
+                // popcount(0..16)
+                0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4, //
+                0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4,
+            ]);
+
+            // Now reduce.
+            let y: u64x4 = unsafe { t(y) };
+            // Note: we do need &mask_f here, since high bits could be set.
             let lo = y & mask_f;
             let hi = (y >> 4) & mask_f;
             let popcnt1: u8x32 = unsafe { t(_mm256_shuffle_epi8(t(byte_counts), t(lo))) };
