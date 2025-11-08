@@ -314,6 +314,24 @@ fn bench_quart<const C3: bool>(seq: &[u8], queries: &QS) {
         |p| ranker.prefetch(p),
         |p| ranker.count::<count4::SimdCount7, false>(p),
     );
+    eprint!(" |");
+
+    time(&queries, |p| {
+        let ranks = black_box(ranker.count_long::<count4::SimdCount7, false>(p));
+        ranks.map(|r| r as u32)
+    });
+
+    time_stream(
+        &queries,
+        B,
+        |p| ranker.prefetch(p),
+        |p| {
+            let ranks = black_box(ranker.count_long::<count4::SimdCount7, false>(p));
+            ranks.map(|r| r as u32)
+        },
+    );
+
+    eprintln!();
 
     // time_coro_stream(&queries, B, |p| {
     //     ranker.count_coro::<count4::U64Popcnt, C3>(p)
@@ -324,7 +342,6 @@ fn bench_quart<const C3: bool>(seq: &[u8], queries: &QS) {
     // time_coro_stream(&queries, B, |p| {
     //     ranker.count_coro::<count4::SimdCount7, false>(p)
     // });
-    eprintln!();
 }
 
 fn main() {
