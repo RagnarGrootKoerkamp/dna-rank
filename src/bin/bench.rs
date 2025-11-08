@@ -9,7 +9,7 @@ use std::{
 
 use dna_rank::{
     DnaRank, Ranks,
-    blocks::{FullBlock, HexaBlock, PentaBlock, QuartBlock},
+    blocks::{FullBlock, HexaBlock, HexaBlock18bit, PentaBlock, QuartBlock},
     count4,
     ranker::Ranker,
 };

@@ -289,7 +289,7 @@ impl Block for QuartBlock {
 #[repr(align(64))]
 #[derive(mem_dbg::MemSize)]
 pub struct PentaBlock {
-    /// 16it counts for the global offset
+    /// 16bit counts for the global offset
     ranks: [u16; 4],
     /// Each u32 is equivalent to [u8; 4] with counts from start to 4 of 5 u64 parts.
     part_ranks: [u32; 4],
@@ -418,6 +418,82 @@ impl Block for HexaBlock {
         }
         for c in 0..4 {
             ranks[c] += (self.part_ranks[c].unbounded_shr(16 - 8 * hex as u32)) as u32 & 0xff;
+        }
+
+        ranks
+    }
+}
+
+/// As HexaBlock, but part_ranks are 'inlined' with ranks
+#[repr(C)]
+#[repr(align(64))]
+#[derive(mem_dbg::MemSize)]
+pub struct HexaBlock18bit {
+    /// for each char:
+    /// - 18bit count for the global offset (in the low bits)
+    /// - u14 = [u7;2] cumulative counts for first 2 of 3 u128 parts.
+    ranks: [u32; 4],
+    // u128x3 = u8x48 = 384 bit packed sequence
+    seq: [u8; 48],
+}
+
+impl Block for HexaBlock18bit {
+    const B: usize = 48;
+    const N: usize = 192;
+    const C: usize = 16;
+    const W: usize = 18;
+
+    fn new(ranks: Ranks, data: &[u8; Self::B]) -> Self {
+        for x in ranks {
+            assert!(x + (Self::N as u32) < (1 << 18));
+        }
+        let mut part_ranks = [0u32; 4];
+        let mut block_ranks = [0u32; 4];
+        // count each part half.
+        for (i, chunk) in data.as_chunks::<16>().0.iter().enumerate() {
+            for c in 0..4 {
+                block_ranks[c as usize] += count_u8x16(chunk, c);
+            }
+            for c in 0..4 {
+                if i < 2 {
+                    assert!(block_ranks[c] < 128);
+                    part_ranks[c] |= block_ranks[c].unbounded_shl(16 - 7 * (i + 1) as u32);
+                }
+            }
+        }
+        HexaBlock18bit {
+            ranks: std::array::from_fn(|c| {
+                (ranks[c] & ((1 << 18) - 1)) + ((part_ranks[c] as u32) << 16)
+            }),
+            seq: *data,
+        }
+    }
+
+    #[inline(always)]
+    fn count<C: CountFn<16>, const C3: bool>(&self, pos: usize) -> Ranks {
+        let mut ranks = [0; 4];
+
+        let hex = pos / 64;
+        let hex_pos = pos % 64;
+
+        let idx = hex * 16;
+        let inner_counts = C::count(&self.seq[idx..idx + 16].try_into().unwrap(), hex_pos);
+        for c in 0..4 {
+            ranks[c] += inner_counts[c];
+        }
+
+        if C3 {
+            ranks[0] = hex_pos as u32 - ranks[1] - ranks[2] - ranks[3];
+        } else {
+            ranks[0] -= extra_counted::<_, C>(pos);
+        }
+
+        for c in 0..4 {
+            // 16+ to move from the high to the low 16 bits.
+            ranks[c] += self.ranks[c].unbounded_shr(16 + 16 - 7 * hex as u32) & 0x7f;
+        }
+        for c in 0..4 {
+            ranks[c] += self.ranks[c] & ((1 << 18) - 1);
         }
 
         ranks
