@@ -9,7 +9,7 @@ use std::{
 
 use dna_rank::{
     DnaRank, Ranks,
-    blocks::{FullBlock, HexaBlock, HexaBlock18bit, PentaBlock, QuartBlock},
+    blocks::{FullBlock, HexaBlock, HexaBlock18bit, PentaBlock, PentaBlock20bit, QuartBlock},
     count4,
     ranker::Ranker,
 };
@@ -337,6 +337,21 @@ fn bench_quart<const C3: bool>(seq: &[u8], queries: &QS) {
     );
 
     eprint!(" |");
+
+    // let ranker = Ranker::<PentaBlock20bit>::new(&seq);
+    // let bits = (ranker.mem_size(Default::default()) * 8) as f64 / seq.len() as f64;
+    // eprint!("{bits:>6.2}b |");
+
+    // time(&queries, |p| ranker.count::<count4::SimdCount7, false>(p));
+
+    // time_stream(
+    //     &queries,
+    //     B,
+    //     |p| ranker.prefetch(p),
+    //     |p| ranker.count::<count4::SimdCount7, false>(p),
+    // );
+
+    // eprint!(" |");
 
     let ranker = Ranker::<HexaBlock>::new(&seq);
     let bits = (ranker.mem_size(Default::default()) * 8) as f64 / seq.len() as f64;
