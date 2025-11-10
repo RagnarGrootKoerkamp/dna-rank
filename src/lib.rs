@@ -11,6 +11,7 @@ pub mod blocks;
 pub mod count;
 pub mod count4;
 pub mod ranker;
+pub mod super_block;
 
 use count::*;
 use packed_seq::{PackedSeqVec, SeqVec};

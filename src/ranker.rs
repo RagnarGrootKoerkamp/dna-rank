@@ -22,6 +22,16 @@ pub trait BasicBlock {
     }
 }
 
+pub trait SuperBlock {
+    /// Number of basic blocks.
+    const BB: usize;
+    /// Bit-width of the basic block ranks.
+    const W: usize;
+
+    fn new(ranks: [Ranks; Self::BB]) -> Self;
+    fn get(&self, idx: usize) -> Ranks;
+}
+
 #[derive(mem_dbg::MemSize)]
 pub struct Ranker<BB: BasicBlock> {
     /// Cacheline-sized counts.
