@@ -12,7 +12,7 @@ use dna_rank::{
     blocks::{
         DumbBlock, FullBlock, HexaBlock, HexaBlock18bit, PentaBlock, PentaBlock20bit, QuartBlock,
     },
-    count4::{self, SimdCount7, WideSimdCount2},
+    count4::{self, SimdCount7, SimdCountSlice, U64PopcntSlice, U128Popcnt3, WideSimdCount2},
     ranker::{Ranker, RankerT},
     super_block::{NoSB, SB8, TrivialSB},
 };
@@ -282,16 +282,6 @@ where
     eprintln!();
 }
 
-#[inline(never)]
-fn bench_rank9(seq: &[u8], queries: &QS) {
-    bench::<Rank9<BitVec<Vec<usize>>>>(seq, queries);
-}
-
-#[inline(never)]
-fn bench_qwt(seq: &[u8], queries: &QS) {
-    bench::<RSQVector256>(seq, queries);
-}
-
 fn bench_coro<R: RankerT>(seq: &[u8], queries: &QS) {
     let ranker = R::new(&seq);
     time_coro_stream(&queries, |p| ranker.count_coro(p));
@@ -300,22 +290,26 @@ fn bench_coro<R: RankerT>(seq: &[u8], queries: &QS) {
 }
 
 #[inline(never)]
-fn bench_broken(seq: &[u8], queries: &QS) {
-    bench::<Ranker<PentaBlock20bit, TrivialSB, SimdCount7, false>>(seq, queries);
-    bench::<Ranker<HexaBlock18bit, TrivialSB, WideSimdCount2, false>>(seq, queries);
-}
+fn bench_all(seq: &[u8], queries: &QS) {
+    // like qwt
+    bench::<Ranker<DumbBlock, TrivialSB, U128Popcnt3, true>>(seq, queries);
+    bench::<Ranker<DumbBlock, TrivialSB, SimdCountSlice, false>>(seq, queries);
+    bench::<Ranker<DumbBlock, SB8, U128Popcnt3, true>>(seq, queries);
+    bench::<Ranker<DumbBlock, SB8, SimdCountSlice, false>>(seq, queries);
 
-#[inline(never)]
-fn bench_new(seq: &[u8], queries: &QS) {
-    bench::<Ranker<DumbBlock, TrivialSB, count4::U128Popcnt3, true>>(seq, queries);
-    bench::<Ranker<DumbBlock, TrivialSB, count4::SimdCountSlice, false>>(seq, queries);
-    bench::<Ranker<DumbBlock, SB8, count4::U128Popcnt3, true>>(seq, queries);
-    bench::<Ranker<DumbBlock, SB8, count4::SimdCountSlice, false>>(seq, queries);
+    // fast
+    bench::<Ranker<FullBlock, NoSB, U64PopcntSlice, false>>(seq, queries);
+    bench::<Ranker<QuartBlock, NoSB, SimdCount7, false>>(seq, queries);
+    bench::<Ranker<PentaBlock, TrivialSB, SimdCount7, false>>(seq, queries);
+    bench::<Ranker<HexaBlock, TrivialSB, WideSimdCount2, false>>(seq, queries);
 
-    bench::<Ranker<FullBlock, NoSB, count4::U64PopcntSlice, false>>(seq, queries);
-    bench::<Ranker<QuartBlock, NoSB, count4::SimdCount7, false>>(seq, queries);
-    bench::<Ranker<PentaBlock, TrivialSB, count4::SimdCount7, false>>(seq, queries);
-    bench::<Ranker<HexaBlock, TrivialSB, count4::WideSimdCount2, false>>(seq, queries);
+    // external
+    bench::<Rank9<BitVec<Vec<usize>>>>(seq, queries);
+    bench::<RSQVector256>(seq, queries);
+
+    // broken
+    // bench::<Ranker<PentaBlock20bit, TrivialSB, SimdCount7, false>>(seq, queries);
+    // bench::<Ranker<HexaBlock18bit, TrivialSB, WideSimdCount2, false>>(seq, queries);
 }
 
 fn main() {
@@ -338,11 +332,7 @@ fn main() {
                 .collect::<Vec<_>>()
         });
 
-        bench_new(&seq, &queries);
-
-        bench_qwt(&seq, &queries);
-
-        // bench_rank9(&seq, &queries);
+        bench_all(&seq, &queries);
 
         // bench_dna_rank::<64>(&seq, &queries);
         // bench_dna_rank::<128>(&seq, &queries);
