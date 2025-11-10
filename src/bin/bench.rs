@@ -7,6 +7,7 @@ use std::{
     pin::pin,
 };
 
+use clap::Parser;
 use dna_rank::{
     Ranks,
     blocks::{FullBlock, HexaBlock, PentaBlock, Plain128, Plain256, Plain512, QuartBlock},
@@ -28,7 +29,7 @@ fn check(pos: usize, ranks: Ranks) {
     }
 }
 
-type QS = [Vec<usize>; 6];
+type QS = Vec<Vec<usize>>;
 
 #[derive(Clone, Copy)]
 enum Threading {
@@ -301,6 +302,12 @@ fn bench_all(seq: &[u8], queries: &QS) {
     // bench::<Ranker<HexaBlock18bit, TrivialSB, WideSimdCount2, false>>(seq, queries);
 }
 
+#[derive(clap::Parser)]
+struct Args {
+    #[clap(short = 'j', long, default_value_t = 6)]
+    threads: usize,
+}
+
 fn main() {
     #[cfg(debug_assertions)]
     let q = 10_000;
@@ -311,15 +318,19 @@ fn main() {
     #[cfg(not(debug_assertions))]
     let ns = [100_000, 1_000_000_000];
 
+    let threads = Args::parse().threads;
+
     for n in ns {
         // for n in [100_000] {
         eprintln!("n = {}", n);
         let seq = b"ACTG".repeat(n / 4);
-        let queries = QS::default().map(|_| {
-            (0..q)
-                .map(|_| rand::random_range(0..seq.len()))
-                .collect::<Vec<_>>()
-        });
+        let queries = (0..threads.max(5))
+            .map(|_| {
+                (0..q)
+                    .map(|_| rand::random_range(0..seq.len()))
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
 
         bench_all(&seq, &queries);
     }

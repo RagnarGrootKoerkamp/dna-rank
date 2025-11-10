@@ -422,6 +422,7 @@ dependencies = [
 name = "dna-rank"
 version = "0.1.0"
 dependencies = [
+ "clap",
  "mem_dbg",
  "packed-seq",
  "qwt",
