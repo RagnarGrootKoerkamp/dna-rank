@@ -20,18 +20,74 @@ fn extra_counted<const B: usize, C: CountFn<B>>(pos: usize) -> u32 {
 /// A full 512bit cacheline block that does not store any counts itself.
 #[repr(align(64))]
 #[derive(mem_dbg::MemSize)]
-pub struct DumbBlock {
+pub struct Plain512 {
     seq: [u8; 64],
 }
 
-impl BasicBlock for DumbBlock {
+impl BasicBlock for Plain512 {
     const B: usize = 64; // Bytes of characters in block.
     const N: usize = 256; // Number of characters in block.
     const C: usize = 64; // Bytes of the underlying count function.
     const W: usize = 0;
 
     fn new(_ranks: Ranks, data: &[u8; Self::B]) -> Self {
-        DumbBlock { seq: *data }
+        Plain512 { seq: *data }
+    }
+
+    #[inline(always)]
+    fn count<C: CountFn<{ Self::C }>, const C3: bool>(&self, pos: usize) -> Ranks {
+        let mut ranks = C::count(&self.seq, pos);
+        if C3 {
+            ranks[0] = pos as u32 - ranks[1] - ranks[2] - ranks[3];
+        } else {
+            ranks[0] -= extra_counted::<_, C>(pos);
+        }
+        ranks
+    }
+}
+
+#[repr(align(32))]
+#[derive(mem_dbg::MemSize)]
+pub struct Plain256 {
+    seq: [u8; 32],
+}
+
+impl BasicBlock for Plain256 {
+    const B: usize = 32; // Bytes of characters in block.
+    const N: usize = 128; // Number of characters in block.
+    const C: usize = 32; // Bytes of the underlying count function.
+    const W: usize = 0;
+
+    fn new(_ranks: Ranks, data: &[u8; Self::B]) -> Self {
+        Self { seq: *data }
+    }
+
+    #[inline(always)]
+    fn count<C: CountFn<{ Self::C }>, const C3: bool>(&self, pos: usize) -> Ranks {
+        let mut ranks = C::count(&self.seq, pos);
+        if C3 {
+            ranks[0] = pos as u32 - ranks[1] - ranks[2] - ranks[3];
+        } else {
+            ranks[0] -= extra_counted::<_, C>(pos);
+        }
+        ranks
+    }
+}
+
+#[repr(align(16))]
+#[derive(mem_dbg::MemSize)]
+pub struct Plain128 {
+    seq: [u8; 16],
+}
+
+impl BasicBlock for Plain128 {
+    const B: usize = 16; // Bytes of characters in block.
+    const N: usize = 64; // Number of characters in block.
+    const C: usize = 16; // Bytes of the underlying count function.
+    const W: usize = 0;
+
+    fn new(_ranks: Ranks, data: &[u8; Self::B]) -> Self {
+        Self { seq: *data }
     }
 
     #[inline(always)]

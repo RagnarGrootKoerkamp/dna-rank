@@ -8,11 +8,9 @@ use std::{
 };
 
 use dna_rank::{
-    DnaRank, Ranks,
-    blocks::{
-        DumbBlock, FullBlock, HexaBlock, HexaBlock18bit, PentaBlock, PentaBlock20bit, QuartBlock,
-    },
-    count4::{self, SimdCount7, SimdCountSlice, U64PopcntSlice, U128Popcnt3, WideSimdCount2},
+    Ranks,
+    blocks::{FullBlock, HexaBlock, PentaBlock, Plain128, Plain256, Plain512, QuartBlock},
+    count4::{SimdCount7, SimdCountSlice, U64PopcntSlice, U128Popcnt3, WideSimdCount2},
     ranker::{Ranker, RankerT},
     super_block::{NoSB, SB8, TrivialSB},
 };
@@ -277,11 +275,15 @@ fn bench_coro<R: RankerT>(seq: &[u8], queries: &QS) {
 
 #[inline(never)]
 fn bench_all(seq: &[u8], queries: &QS) {
+    bench_header();
+    // plain external vec
+    bench::<Ranker<Plain128, TrivialSB, WideSimdCount2, false>>(seq, queries);
+    bench::<Ranker<Plain256, TrivialSB, SimdCountSlice, false>>(seq, queries);
+    bench::<Ranker<Plain512, TrivialSB, SimdCountSlice, false>>(seq, queries);
+
     // like qwt
-    bench::<Ranker<DumbBlock, TrivialSB, U128Popcnt3, true>>(seq, queries);
-    bench::<Ranker<DumbBlock, TrivialSB, SimdCountSlice, false>>(seq, queries);
-    bench::<Ranker<DumbBlock, SB8, U128Popcnt3, true>>(seq, queries);
-    bench::<Ranker<DumbBlock, SB8, SimdCountSlice, false>>(seq, queries);
+    bench::<Ranker<Plain512, SB8, U128Popcnt3, true>>(seq, queries);
+    bench::<Ranker<Plain512, SB8, SimdCountSlice, false>>(seq, queries);
 
     // fast
     bench::<Ranker<FullBlock, NoSB, U64PopcntSlice, false>>(seq, queries);
