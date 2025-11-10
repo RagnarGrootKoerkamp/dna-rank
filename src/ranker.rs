@@ -33,14 +33,14 @@ pub trait SuperBlock {
 }
 
 #[derive(mem_dbg::MemSize)]
-pub struct Ranker<BB: BasicBlock> {
+pub struct Ranker<BB: BasicBlock, SB: SuperBlock> {
     /// Cacheline-sized counts.
     blocks: Vec<BB>,
     /// Additional counts every 2^31 cachelines.
-    long_ranks: Vec<Ranks>,
+    super_blocks: Vec<SB>,
 }
 
-impl<BB: BasicBlock> Ranker<BB> {
+impl<BB: BasicBlock, SB: SuperBlock> Ranker<BB, SB> {
     /// Store a new long block every this-many blocks.
     // Each long block should span N*x characters where N*x + N < 2^32, and x is fast to compute.
     // => x < 2^32 / N - 1
@@ -53,25 +53,26 @@ impl<BB: BasicBlock> Ranker<BB> {
     pub fn new(seq: &[u8]) -> Self
     where
         [(); BB::B]:,
+        [(); SB::BB]:,
     {
         let mut packed_seq = PackedSeqVec::from_ascii(seq).into_raw();
         // Add one block of padding.
         packed_seq.resize(packed_seq.len() + 2 * BB::B, 0);
 
         let mut ranks = [0u32; 4];
-        let mut l_ranks = [0u64; 4];
+        let mut l_ranks = [0u32; 4];
 
         let chunks = packed_seq.as_chunks::<{ BB::B }>().0;
         let num_chunks = chunks.len();
         let num_long_chunks = num_chunks.div_ceil(Self::LONG_STRIDE);
-        let mut long_ranks = Vec::with_capacity(num_long_chunks);
+        let mut block_ranks = Vec::with_capacity(num_long_chunks);
         let mut blocks = Vec::with_capacity(num_chunks);
         for (i, chunk) in chunks.iter().enumerate() {
             if i % Self::LONG_STRIDE == 0 {
                 for i in 0..4 {
-                    l_ranks[i] += ranks[i] as u64;
+                    l_ranks[i] += ranks[i];
                 }
-                long_ranks.push(l_ranks.map(|x| x as u32));
+                block_ranks.push(l_ranks);
                 ranks = [0; 4];
             }
             blocks.push(BB::new(ranks, chunk));
@@ -82,7 +83,23 @@ impl<BB: BasicBlock> Ranker<BB> {
                 }
             }
         }
-        Self { blocks, long_ranks }
+
+        while block_ranks.len() % SB::BB != 0 {
+            block_ranks.push(l_ranks);
+        }
+
+        // convert block ranks to superblocks.
+        let super_blocks = block_ranks
+            .as_chunks()
+            .0
+            .iter()
+            .map(|x| SB::new(*x))
+            .collect();
+
+        Self {
+            blocks,
+            super_blocks,
+        }
     }
     /// Prefetch the cacheline for the given position.
     #[inline(always)]
@@ -91,7 +108,7 @@ impl<BB: BasicBlock> Ranker<BB> {
         prefetch_index(&self.blocks, block_idx);
         if BB::W < 32 {
             let long_pos = block_idx / Self::LONG_STRIDE;
-            prefetch_index(&self.long_ranks, long_pos);
+            prefetch_index(&self.super_blocks, long_pos / SB::BB);
         }
     }
     /// Count the number of times each character occurs before position `pos`.
@@ -102,7 +119,7 @@ impl<BB: BasicBlock> Ranker<BB> {
         let mut ranks = self.blocks[block_idx].count::<CF, C3>(block_pos);
         if BB::W < 32 {
             let long_pos = block_idx / Self::LONG_STRIDE;
-            let long_ranks = self.long_ranks[long_pos];
+            let long_ranks = self.super_blocks[long_pos / SB::BB].get(long_pos % SB::BB);
             for c in 0..4 {
                 ranks[c] += long_ranks[c];
             }
