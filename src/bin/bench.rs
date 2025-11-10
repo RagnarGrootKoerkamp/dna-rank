@@ -2,7 +2,6 @@
 #![feature(generic_const_exprs, coroutines, coroutine_trait, stmt_expr_attributes)]
 use std::{
     array::from_fn,
-    hint::black_box,
     ops::{Coroutine, CoroutineState::Complete},
     pin::pin,
 };
@@ -17,7 +16,7 @@ use dna_rank::{
     super_block::{NoSB, SB8, TrivialSB},
 };
 use mem_dbg::MemSize;
-use qwt::{RankQuad, RankUnsigned, SpaceUsage, WTSupport};
+use qwt::{RankQuad, SpaceUsage, WTSupport};
 use sux::{bits::BitVec, traits::Rank};
 
 fn check(pos: usize, ranks: Ranks) {
@@ -278,6 +277,52 @@ fn bench_qwt(seq: &[u8], queries: &QS) {
 }
 
 #[inline(never)]
+fn bench_broken<const C3: bool>(seq: &[u8], queries: &QS) {
+    let ranker = Ranker::<PentaBlock20bit, TrivialSB>::new(&seq);
+    let bits = (ranker.mem_size(Default::default()) * 8) as f64 / seq.len() as f64;
+    eprint!("{bits:>6.2}b |");
+
+    time_loop(&queries, |p| ranker.count::<count4::SimdCount7, false>(p));
+
+    time_stream(
+        &queries,
+        B,
+        |p| ranker.prefetch(p),
+        |p| ranker.count::<count4::SimdCount7, false>(p),
+    );
+
+    eprint!(" |");
+
+    let ranker = Ranker::<HexaBlock18bit, TrivialSB>::new(&seq);
+    let bits = (ranker.mem_size(Default::default()) * 8) as f64 / seq.len() as f64;
+    eprint!("{bits:>6.2}b |");
+
+    time_loop(&queries, |p| {
+        ranker.count::<count4::WideSimdCount2, false>(p)
+    });
+
+    time_stream(
+        &queries,
+        B,
+        |p| ranker.prefetch(p),
+        |p| ranker.count::<count4::WideSimdCount2, false>(p),
+    );
+}
+
+fn bench_coro<const C3: bool>(seq: &[u8], queries: &QS) {
+    let ranker = Ranker::<QuartBlock, NoSB>::new(&seq);
+    time_coro_stream(&queries, B, |p| {
+        ranker.count_coro::<count4::U64Popcnt, C3>(p)
+    });
+    time_coro_stream(&queries, B, |p| {
+        ranker.count_coro::<count4::ByteLookup8, C3>(p)
+    });
+    time_coro_stream(&queries, B, |p| {
+        ranker.count_coro::<count4::SimdCount7, false>(p)
+    });
+}
+
+#[inline(never)]
 fn bench_quart<const C3: bool>(seq: &[u8], queries: &QS) {
     eprint!("{:<20}:", format!("QuartBlock {C3}"));
 
@@ -301,19 +346,6 @@ fn bench_quart<const C3: bool>(seq: &[u8], queries: &QS) {
     let bits = (ranker.mem_size(Default::default()) * 8) as f64 / seq.len() as f64;
     eprint!("{bits:>6.2}b |");
 
-    // time_fn(queries, |queries| {
-    //     for &q in queries {
-    //         std::hint::black_box(ranker.count1(q, q as u8 & 3));
-    //     }
-    // });
-    // time_fn(queries, |queries| {
-    //     for (&q, &ahead) in queries.iter().zip(&queries[32..]) {
-    //         ranker.prefetch(ahead);
-    //         std::hint::black_box(ranker.count1(q, q as u8 & 3));
-    //     }
-    // });
-
-    // time(&queries, |p| ranker.count::<count4::U64Popcnt, C3>(p));
     time_loop(&queries, |p| ranker.count::<count4::SimdCount7, false>(p));
 
     time_stream(
@@ -339,21 +371,6 @@ fn bench_quart<const C3: bool>(seq: &[u8], queries: &QS) {
 
     eprint!(" |");
 
-    // let ranker = Ranker::<PentaBlock20bit>::new(&seq);
-    // let bits = (ranker.mem_size(Default::default()) * 8) as f64 / seq.len() as f64;
-    // eprint!("{bits:>6.2}b |");
-
-    // time(&queries, |p| ranker.count::<count4::SimdCount7, false>(p));
-
-    // time_stream(
-    //     &queries,
-    //     B,
-    //     |p| ranker.prefetch(p),
-    //     |p| ranker.count::<count4::SimdCount7, false>(p),
-    // );
-
-    // eprint!(" |");
-
     let ranker = Ranker::<HexaBlock, TrivialSB>::new(&seq);
     let bits = (ranker.mem_size(Default::default()) * 8) as f64 / seq.len() as f64;
     eprint!("{bits:>6.2}b |");
@@ -368,34 +385,8 @@ fn bench_quart<const C3: bool>(seq: &[u8], queries: &QS) {
         |p| ranker.prefetch(p),
         |p| ranker.count::<count4::WideSimdCount2, false>(p),
     );
-    eprint!(" |");
-
-    // let ranker = Ranker::<HexaBlock18bit>::new(&seq);
-    // let bits = (ranker.mem_size(Default::default()) * 8) as f64 / seq.len() as f64;
-    // eprint!("{bits:>6.2}b |");
-
-    // time(&queries, |p| {
-    //     ranker.count::<count4::WideSimdCount2, false>(p)
-    // });
-
-    // time_stream(
-    //     &queries,
-    //     B,
-    //     |p| ranker.prefetch(p),
-    //     |p| ranker.count::<count4::WideSimdCount2, false>(p),
-    // );
 
     eprintln!();
-
-    // time_coro_stream(&queries, B, |p| {
-    //     ranker.count_coro::<count4::U64Popcnt, C3>(p)
-    // });
-    // time_coro_stream(&queries, B, |p| {
-    //     ranker.count_coro::<count4::ByteLookup8, C3>(p)
-    // });
-    // time_coro_stream(&queries, B, |p| {
-    //     ranker.count_coro::<count4::SimdCount7, false>(p)
-    // });
 }
 
 #[inline(never)]
