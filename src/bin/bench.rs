@@ -17,8 +17,8 @@ use dna_rank::{
     super_block::{NoSB, SB8, TrivialSB},
 };
 use mem_dbg::MemSize;
-use qwt::{RankQuad, SpaceUsage, WTSupport};
-use sux::{bits::BitVec, traits::Rank};
+use qwt::RSQVector256;
+use sux::{bits::BitVec, prelude::Rank9, traits::Rank};
 
 fn check(pos: usize, ranks: Ranks) {
     std::hint::black_box(&ranks);
@@ -284,54 +284,12 @@ where
 
 #[inline(never)]
 fn bench_rank9(seq: &[u8], queries: &QS) {
-    eprint!("{:<20}:", "rank9");
-
-    // Cast to slice of usize.
-    let bitvec = unsafe { BitVec::from_raw_parts(seq.align_to().1, seq.len() * 8) };
-    let rank9 = sux::rank_sel::Rank9::new(bitvec);
-
-    let bits = rank9.mem_size(Default::default()) as f64 / seq.len() as f64;
-    eprint!("{bits:>6.2}b |");
-
-    time_loop(&queries, Threading::Single, |p| {
-        [rank9.rank(p) as u32, 0, 0, 0]
-    });
-    eprintln!();
+    bench::<Rank9<BitVec<Vec<usize>>>>(seq, queries);
 }
 
 #[inline(never)]
 fn bench_qwt(seq: &[u8], queries: &QS) {
-    let seq = seq
-        .iter()
-        .map(|&b| match b {
-            b'A' => 0u8,
-            b'C' => 1,
-            b'G' => 2,
-            b'T' => 3,
-            _ => 0,
-        })
-        .collect::<Vec<_>>();
-
-    eprint!("{:<20}:", "RSQ256");
-    let rsq = qwt::RSQVector256::new(&seq);
-    let bits = (rsq.space_usage_byte() * 8) as f64 / seq.len() as f64;
-    eprint!("{bits:>6.2}b |");
-    unsafe {
-        time_loop(&queries, Threading::Single, |p| {
-            [rsq.rank_unchecked(0, p) as u32, 0, 0, 0]
-        });
-
-        time_stream(
-            &queries,
-            Threading::Single,
-            |p| {
-                rsq.prefetch_data(p);
-                rsq.prefetch_info(p)
-            },
-            |p| [rsq.rank_unchecked(0, p) as u32, 0, 0, 0],
-        );
-    }
-    eprintln!();
+    bench::<RSQVector256>(seq, queries);
 }
 
 fn bench_coro<R: RankerT>(seq: &[u8], queries: &QS) {

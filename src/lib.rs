@@ -11,6 +11,8 @@
 pub mod blocks;
 pub mod count;
 pub mod count4;
+pub mod qwt;
+pub mod rank9;
 pub mod ranker;
 pub mod super_block;
 
