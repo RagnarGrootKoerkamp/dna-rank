@@ -1,7 +1,7 @@
 #![allow(incomplete_features, dead_code)]
 #![feature(generic_const_exprs, coroutines, coroutine_trait, stmt_expr_attributes)]
 use std::{
-    any::type_name_of_val,
+    any::type_name,
     array::from_fn,
     ops::{Coroutine, CoroutineState::Complete},
     pin::pin,
@@ -12,8 +12,8 @@ use dna_rank::{
     blocks::{
         DumbBlock, FullBlock, HexaBlock, HexaBlock18bit, PentaBlock, PentaBlock20bit, QuartBlock,
     },
-    count4::{self, CountFn, SimdCount7, WideSimdCount2},
-    ranker::{BasicBlock, Ranker, SuperBlock},
+    count4::{self, SimdCount7, WideSimdCount2},
+    ranker::{Ranker, RankerT},
     super_block::{NoSB, SB8, TrivialSB},
 };
 use mem_dbg::MemSize;
@@ -150,38 +150,22 @@ fn time_trip(
     time_stream(queries, t, prefetch, f);
 }
 
-fn bench<BB: BasicBlock, SB: SuperBlock, CF: CountFn<{ BB::C }>, const C3: bool>(
-    seq: &[u8],
-    queries: &QS,
-) where
-    [(); BB::B]:,
-    [(); SB::BB]:,
-    Ranker<BB, SB>: MemSize,
-{
-    let name = type_name_of_val(&Ranker::<BB, SB>::count::<CF, C3>);
+fn bench<R: RankerT>(seq: &[u8], queries: &QS) {
+    let name = type_name::<R>();
     let name = regex::Regex::new(r"[a-zA-Z0-9_]+::")
         .unwrap()
         .replace_all(name, |_: &regex::Captures| "".to_string());
 
     eprint!("{name:<60}");
 
-    let ranker = Ranker::<BB, SB>::new(&seq);
-    let bits = (ranker.mem_size(Default::default()) * 8) as f64 / seq.len() as f64;
+    let ranker = R::new(&seq);
+    let bits = (ranker.size() * 8) as f64 / seq.len() as f64;
     eprint!("{bits:>6.2}b |");
 
-    time_trip(
-        &queries,
-        Threading::Single,
-        |p| ranker.prefetch(p),
-        |p| ranker.count::<CF, false>(p),
-    );
-    eprint!(" |");
-    time_trip(
-        &queries,
-        Threading::Multi,
-        |p| ranker.prefetch(p),
-        |p| ranker.count::<CF, false>(p),
-    );
+    for t in [Threading::Single, Threading::Multi] {
+        time_trip(&queries, t, |p| ranker.prefetch(p), |p| ranker.count(p));
+        eprint!(" |");
+    }
     eprintln!();
 }
 
@@ -350,34 +334,30 @@ fn bench_qwt(seq: &[u8], queries: &QS) {
     eprintln!();
 }
 
-fn bench_coro<const C3: bool>(seq: &[u8], queries: &QS) {
-    let ranker = Ranker::<QuartBlock, NoSB>::new(&seq);
-    time_coro_stream(&queries, |p| ranker.count_coro::<count4::U64Popcnt, C3>(p));
-    time_coro_stream(&queries, |p| {
-        ranker.count_coro::<count4::ByteLookup8, C3>(p)
-    });
-    time_coro_stream(&queries, |p| {
-        ranker.count_coro::<count4::SimdCount7, false>(p)
-    });
+fn bench_coro<R: RankerT>(seq: &[u8], queries: &QS) {
+    let ranker = R::new(&seq);
+    time_coro_stream(&queries, |p| ranker.count_coro(p));
+    time_coro_stream(&queries, |p| ranker.count_coro(p));
+    time_coro_stream(&queries, |p| ranker.count_coro(p));
 }
 
 #[inline(never)]
 fn bench_broken(seq: &[u8], queries: &QS) {
-    bench::<PentaBlock20bit, TrivialSB, SimdCount7, false>(seq, queries);
-    bench::<HexaBlock18bit, TrivialSB, WideSimdCount2, false>(seq, queries);
+    bench::<Ranker<PentaBlock20bit, TrivialSB, SimdCount7, false>>(seq, queries);
+    bench::<Ranker<HexaBlock18bit, TrivialSB, WideSimdCount2, false>>(seq, queries);
 }
 
 #[inline(never)]
 fn bench_new(seq: &[u8], queries: &QS) {
-    bench::<DumbBlock, TrivialSB, count4::U128Popcnt3, true>(seq, queries);
-    bench::<DumbBlock, TrivialSB, count4::SimdCountSlice, false>(seq, queries);
-    bench::<DumbBlock, SB8, count4::U128Popcnt3, true>(seq, queries);
-    bench::<DumbBlock, SB8, count4::SimdCountSlice, false>(seq, queries);
+    bench::<Ranker<DumbBlock, TrivialSB, count4::U128Popcnt3, true>>(seq, queries);
+    bench::<Ranker<DumbBlock, TrivialSB, count4::SimdCountSlice, false>>(seq, queries);
+    bench::<Ranker<DumbBlock, SB8, count4::U128Popcnt3, true>>(seq, queries);
+    bench::<Ranker<DumbBlock, SB8, count4::SimdCountSlice, false>>(seq, queries);
 
-    bench::<FullBlock, NoSB, count4::U64PopcntSlice, false>(seq, queries);
-    bench::<QuartBlock, NoSB, count4::SimdCount7, false>(seq, queries);
-    bench::<PentaBlock, TrivialSB, count4::SimdCount7, false>(seq, queries);
-    bench::<HexaBlock, TrivialSB, count4::WideSimdCount2, false>(seq, queries);
+    bench::<Ranker<FullBlock, NoSB, count4::U64PopcntSlice, false>>(seq, queries);
+    bench::<Ranker<QuartBlock, NoSB, count4::SimdCount7, false>>(seq, queries);
+    bench::<Ranker<PentaBlock, TrivialSB, count4::SimdCount7, false>>(seq, queries);
+    bench::<Ranker<HexaBlock, TrivialSB, count4::WideSimdCount2, false>>(seq, queries);
 }
 
 fn main() {

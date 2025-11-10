@@ -1,6 +1,7 @@
 use crate::count::count_u8x8;
 use crate::{Ranks, count4::CountFn};
 use packed_seq::{PackedSeqVec, SeqVec};
+use std::marker::PhantomData;
 use std::ops::Coroutine;
 
 pub trait BasicBlock: Sync {
@@ -32,29 +33,50 @@ pub trait SuperBlock: Sync {
     fn get(&self, idx: usize) -> Ranks;
 }
 
-#[derive(mem_dbg::MemSize)]
-pub struct Ranker<BB: BasicBlock, SB: SuperBlock> {
+pub trait RankerT: Sync {
+    fn new(seq: &[u8]) -> Self;
+    /// Prefetch the cacheline for the given position.
+    fn prefetch(&self, pos: usize);
+    fn size(&self) -> usize;
+    /// Count the number of times each character occurs before position `pos`.
+    fn count(&self, pos: usize) -> Ranks;
+    /// Count the number of times character `c` occurs before position `pos`.
+    fn count1(&self, pos: usize, c: u8) -> u32;
+
+    #[inline(always)]
+    fn count_coro(&self, pos: usize) -> impl Coroutine<Yield = (), Return = Ranks> + Unpin {
+        self.prefetch(pos);
+        #[inline(always)]
+        #[coroutine]
+        move || self.count(pos)
+    }
+    #[inline(always)]
+    fn count_coro2(&self, pos: usize) -> impl Coroutine<Yield = (), Return = Ranks> + Unpin {
+        #[inline(always)]
+        #[coroutine]
+        move || {
+            self.prefetch(pos);
+            yield;
+            self.count(pos)
+        }
+    }
+}
+
+pub struct Ranker<BB: BasicBlock, SB: SuperBlock, CF: CountFn<{ BB::C }>, const C3: bool> {
     /// Cacheline-sized counts.
     blocks: Vec<BB>,
     /// Additional counts every 2^31 cachelines.
     super_blocks: Vec<SB>,
+    cf: PhantomData<CF>,
 }
 
-impl<BB: BasicBlock, SB: SuperBlock> Ranker<BB, SB> {
-    /// Store a new long block every this-many blocks.
-    // Each long block should span N*x characters where N*x + N < 2^32, and x is fast to compute.
-    // => x < 2^32 / N - 1
-    const LONG_STRIDE: usize = if BB::W == 0 {
-        1
-    } else {
-        (((1u128 << BB::W) / BB::N as u128) as usize - 1).next_power_of_two() / 2
-    };
-
-    pub fn new(seq: &[u8]) -> Self
-    where
-        [(); BB::B]:,
-        [(); SB::BB]:,
-    {
+impl<BB: BasicBlock, SB: SuperBlock, CF: CountFn<{ BB::C }>, const C3: bool> RankerT
+    for Ranker<BB, SB, CF, C3>
+where
+    [(); BB::B]:,
+    [(); SB::BB]:,
+{
+    fn new(seq: &[u8]) -> Self {
         let mut packed_seq = PackedSeqVec::from_ascii(seq).into_raw();
         // Add one block of padding.
         packed_seq.resize(packed_seq.len() + 2 * BB::B, 0);
@@ -99,11 +121,12 @@ impl<BB: BasicBlock, SB: SuperBlock> Ranker<BB, SB> {
         Self {
             blocks,
             super_blocks,
+            cf: PhantomData,
         }
     }
     /// Prefetch the cacheline for the given position.
     #[inline(always)]
-    pub fn prefetch(&self, pos: usize) {
+    fn prefetch(&self, pos: usize) {
         let block_idx = pos / BB::N;
         prefetch_index(&self.blocks, block_idx);
         if BB::W < 32 {
@@ -111,9 +134,14 @@ impl<BB: BasicBlock, SB: SuperBlock> Ranker<BB, SB> {
             prefetch_index(&self.super_blocks, long_pos / SB::BB);
         }
     }
+
+    fn size(&self) -> usize {
+        self.blocks.len() * size_of::<BB>() + self.super_blocks.len() * size_of::<SB>()
+    }
+
     /// Count the number of times each character occurs before position `pos`.
     #[inline(always)]
-    pub fn count<CF: CountFn<{ BB::C }>, const C3: bool>(&self, pos: usize) -> Ranks {
+    fn count(&self, pos: usize) -> Ranks {
         let block_idx = pos / BB::N;
         let block_pos = pos % BB::N;
         let mut ranks = self.blocks[block_idx].count::<CF, C3>(block_pos);
@@ -128,35 +156,25 @@ impl<BB: BasicBlock, SB: SuperBlock> Ranker<BB, SB> {
     }
     /// Count the number of times character `c` occurs before position `pos`.
     #[inline(always)]
-    pub fn count1(&self, pos: usize, c: u8) -> u32 {
+    fn count1(&self, pos: usize, c: u8) -> u32 {
         let block_idx = pos / BB::N;
         let block_pos = pos % BB::N;
         self.blocks[block_idx].count1(block_pos, c)
     }
-
-    #[inline(always)]
-    pub fn count_coro<CF: CountFn<{ BB::C }>, const C3: bool>(
-        &self,
-        pos: usize,
-    ) -> impl Coroutine<Yield = (), Return = Ranks> + Unpin {
-        self.prefetch(pos);
-        #[inline(always)]
-        #[coroutine]
-        move || self.count::<CF, C3>(pos)
-    }
-    #[inline(always)]
-    pub fn count_coro2<CF: CountFn<{ BB::C }>, const C3: bool>(
-        &self,
-        pos: usize,
-    ) -> impl Coroutine<Yield = (), Return = Ranks> + Unpin {
-        #[inline(always)]
-        #[coroutine]
-        move || {
-            self.prefetch(pos);
-            yield;
-            self.count::<CF, C3>(pos)
-        }
-    }
+}
+impl<BB: BasicBlock, SB: SuperBlock, CF: CountFn<{ BB::C }>, const C3: bool> Ranker<BB, SB, CF, C3>
+where
+    [(); BB::B]:,
+    [(); SB::BB]:,
+{
+    /// Store a new long block every this-many blocks.
+    // Each long block should span N*x characters where N*x + N < 2^32, and x is fast to compute.
+    // => x < 2^32 / N - 1
+    const LONG_STRIDE: usize = if BB::W == 0 {
+        1
+    } else {
+        (((1u128 << BB::W) / BB::N as u128) as usize - 1).next_power_of_two() / 2
+    };
 }
 
 /// Prefetch the given cacheline into L1 cache.

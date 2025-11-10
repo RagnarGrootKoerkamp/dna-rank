@@ -12,7 +12,7 @@ use crate::{
     count::{count_u8, count_u64, count_u128},
 };
 
-pub trait CountFn<const B: usize> {
+pub trait CountFn<const B: usize>: Sync {
     /// The number of bytes processed at a time.
     /// Used to compute the overshoot.
     const S: usize;
