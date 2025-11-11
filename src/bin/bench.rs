@@ -1,4 +1,4 @@
-#![allow(incomplete_features, dead_code)]
+#![allow(incomplete_features, dead_code, unused)]
 #![feature(generic_const_exprs, coroutines, coroutine_trait, stmt_expr_attributes)]
 use std::{
     any::type_name,
@@ -10,7 +10,9 @@ use std::{
 use clap::Parser;
 use dna_rank::{
     Ranks,
-    blocks::{FullBlock, HexaBlock, PentaBlock, Plain128, Plain256, Plain512, QuartBlock},
+    blocks::{
+        FullBlock, FullBlockMid, HexaBlock, PentaBlock, Plain128, Plain256, Plain512, QuartBlock,
+    },
     count4::{SimdCount7, SimdCountSlice, U64PopcntSlice, U128Popcnt3, WideSimdCount2},
     ranker::{Ranker, RankerT},
     super_block::{NoSB, SB8, TrivialSB},
@@ -237,10 +239,17 @@ where
     });
 }
 
-fn bench_header() {
+fn bench_header(threads: usize) {
     eprintln!(
         "{:<60} {:>6} | {:>6} {:>6} {:>6} | {:>6} {:>6} {:>6} |",
-        "Ranker", "bits", "1t", "", "", "6t", "", ""
+        "Ranker",
+        "bits",
+        "1t",
+        "",
+        "",
+        format!("{threads}t",),
+        "",
+        ""
     );
     eprintln!(
         "{:<60} {:>6} | {:>6} {:>6} {:>6} | {:>6} {:>6} {:>6} |",
@@ -276,7 +285,7 @@ fn bench_coro<R: RankerT>(seq: &[u8], queries: &QS) {
 
 #[inline(never)]
 fn bench_all(seq: &[u8], queries: &QS) {
-    bench_header();
+    bench_header(queries.len());
     // plain external vec
     // bench::<Ranker<Plain128, TrivialSB, WideSimdCount2, false>>(seq, queries);
     // bench::<Ranker<Plain256, TrivialSB, SimdCountSlice, false>>(seq, queries);
@@ -288,6 +297,8 @@ fn bench_all(seq: &[u8], queries: &QS) {
 
     // fast
     bench::<Ranker<FullBlock, NoSB, U64PopcntSlice, false>>(seq, queries);
+    bench::<Ranker<FullBlockMid, NoSB, U64PopcntSlice, false>>(seq, queries);
+    bench::<Ranker<FullBlockMid, NoSB, WideSimdCount2, false>>(seq, queries);
     bench::<Ranker<QuartBlock, NoSB, SimdCount7, false>>(seq, queries);
     bench::<Ranker<PentaBlock, TrivialSB, SimdCount7, false>>(seq, queries);
     bench::<Ranker<HexaBlock, TrivialSB, WideSimdCount2, false>>(seq, queries);
@@ -313,18 +324,18 @@ struct Args {
 fn main() {
     #[cfg(debug_assertions)]
     let q = 10_000;
-    // #[cfg(debug_assertions)]
-    // let ns = [100_000];
+    #[cfg(debug_assertions)]
+    let ns = [100_000];
     #[cfg(not(debug_assertions))]
     let q = 10_000_000;
-    // #[cfg(not(debug_assertions))]
-    // let ns = [100_000, 1_000_000_000];
+    #[cfg(not(debug_assertions))]
+    let ns = [100_000, 1_000_000_000];
 
     let args = Args::parse();
     let threads = args.threads;
-    let n = args.n;
+    // let n = args.n;
 
-    for n in [n] {
+    for n in ns {
         // for n in [100_000] {
         eprintln!("n = {}", n);
         let seq = b"ACTG".repeat(n / 4);

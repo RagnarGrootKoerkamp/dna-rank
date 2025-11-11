@@ -152,6 +152,76 @@ impl BasicBlock for FullBlock {
 }
 
 /// For each 128bp, store:
+/// - 4 u64 counts *to the middle, after 64bp*, for 256bits total
+/// - 256 bits of packed sequence.
+/// In total, exactly covers a 512bit cache line.
+///
+/// Based on BWA: https://github.com/lh3/bwa/blob/master/bwtindex.c#L150
+#[repr(align(64))]
+#[derive(mem_dbg::MemSize)]
+pub struct FullBlockMid {
+    // 4*64 = 256 bit counts
+    ranks: [u64; 4],
+    // 4*64 = 32*8 = 256 bit packed sequence
+    seq: [u8; 32],
+}
+
+impl BasicBlock for FullBlockMid {
+    const B: usize = 32; // Bytes of characters in block.
+    const N: usize = 128; // Number of characters in block.
+    const C: usize = 16; // Bytes of the underlying count function.
+    const W: usize = 64;
+
+    fn new(mut ranks: Ranks, data: &[u8; Self::B]) -> Self {
+        for chunk in &data.as_chunks::<8>().0[0..2] {
+            for c in 0..4 {
+                ranks[c as usize] += count_u8x8(chunk, c) as u32;
+            }
+        }
+        let sum = ranks[0] + ranks[1] + ranks[2] + ranks[3];
+        assert!(sum as usize % Self::N == Self::N / 2);
+        Self {
+            ranks: ranks.map(|x| x as u64),
+            seq: *data,
+        }
+    }
+
+    #[inline(always)]
+    fn count<C: CountFn<{ Self::C }>, const C3: bool>(&self, pos: usize) -> Ranks {
+        let mut ranks = [0; 4];
+        for c in 0..4 {
+            ranks[c] += self.ranks[c] as u32;
+        }
+
+        if pos < 64 {
+            let inner_counts = C::count_right(&self.seq[0..16].try_into().unwrap(), pos);
+            if !C3 {
+                // ranks[0] += pos as u32 % 64;
+                let e = extra_counted::<_, C>(pos);
+                let f = (C::S as u32 * 4 - e) % (C::S as u32 * 4);
+                ranks[0] += f;
+            }
+            for c in 0..4 {
+                ranks[c] -= inner_counts[c];
+            }
+        } else {
+            let inner_counts = C::count(&self.seq[16..32].try_into().unwrap(), pos % 64);
+            for c in 0..4 {
+                ranks[c] += inner_counts[c];
+            }
+            if !C3 {
+                ranks[0] -= extra_counted::<_, C>(pos);
+            }
+        }
+
+        if C3 {
+            ranks[0] = pos as u32 - ranks[1] - ranks[2] - ranks[3];
+        }
+        ranks
+    }
+}
+
+/// For each 128bp, store:
 /// - u8 offsets
 /// - 3 u64 counts for c=1,2,3
 /// - 256 bits of packed sequence.
