@@ -1,6 +1,6 @@
 #![allow(non_camel_case_types)]
 
-use std::{array::from_fn, hint::assert_unchecked};
+use std::{arch::x86_64::_mm_sign_epi32, array::from_fn, simd::u32x4};
 
 use crate::{
     Ranks, add,
@@ -11,6 +11,9 @@ use crate::{
 
 #[inline(always)]
 fn extra_counted<const B: usize, C: CountFn<B>>(pos: usize) -> u32 {
+    if C::S == 0 {
+        return 0;
+    }
     let ans = (if C::FIXED {
         (C::S * 4) - pos % (C::S * 4)
     } else {
@@ -856,22 +859,226 @@ impl BasicBlock for HexaBlockMid {
             for c in 0..4 {
                 ranks[c] += inner_counts[c];
             }
-            // if !C3 {
-            //     ranks[0] = ranks[0].wrapping_sub(32);
-            // }
         }
 
         if C3 {
             ranks[0] = hex_pos as u32 - ranks[1] - ranks[2] - ranks[3];
         } else {
-            ranks[0] = ranks[0].wrapping_add(((pos as u32 + 32) % 64).wrapping_sub(32));
+            if C::S != 0 {
+                ranks[0] = ranks[0].wrapping_add(((pos as u32 + 32) % 64).wrapping_sub(32));
+            }
         }
 
         for c in 0..4 {
             ranks[c] += (self.ranks[c] & 0xffff) >> (16 - 8 * (hex / 2) as u32) & 0xff;
-            // ranks[c] += (self.part_ranks[c].unbounded_shr(16 - 8 * (hex / 2) as u32)) as u32 & 0xff;
         }
-
         ranks
+
+        // NOTE: Above could be a lookup:
+        // let mut ranks = u32x4::from_array(ranks);
+        // let self_ranks = u32x4::from_array(self.ranks);
+        // ranks += (self_ranks >> 16) + ((self_ranks & u32x4::splat(0xffff)) >> SHUFFLE[hex])
+        //     & u32x4::splat(0xff);
+        // ranks.to_array()
+    }
+}
+
+// New: avoid the if statement to add or subtract.
+#[repr(align(64))]
+#[derive(mem_dbg::MemSize)]
+pub struct HexaBlockMid2 {
+    /// high half: 16bit counts for the global offset to position 32 (middle of first u128).
+    /// low half: 2x 8bit counts for the first half of 2nd and 3rd 128 parts.
+    ranks: [u32; 4],
+    // u128x3 = u8x48 = 384 bit packed sequence
+    seq: [u8; 48],
+}
+
+impl BasicBlock for HexaBlockMid2 {
+    const B: usize = 48;
+    const N: usize = 192;
+    const C: usize = 8;
+    const W: usize = 16;
+
+    fn new(mut ranks: Ranks, data: &[u8; Self::B]) -> Self {
+        // Counts before each u64 block.
+        let mut bs = [[0u32; 4]; 6];
+        // count each part half.
+        for (i, chunk) in data.as_chunks::<8>().0.iter().enumerate() {
+            bs[i] = add(bs[i], count4_u8x8(*chunk));
+        }
+        // global ranks include the first u64.
+        ranks = add(ranks, bs[0]);
+        let p1 = add(bs[1], bs[2]);
+        let p2 = add(add(bs[1], bs[2]), add(bs[3], bs[4]));
+        let part_ranks: Ranks = from_fn(|c| (p1[c] << 8) | p2[c]);
+        Self {
+            ranks: from_fn(|c| (ranks[c] << 16) | part_ranks[c]),
+            seq: *data,
+        }
+    }
+
+    #[inline(always)]
+    fn count<C: CountFn<8>, const C3: bool>(&self, pos: usize) -> Ranks {
+        assert!(!C3);
+        assert!(C::S == 0);
+        let mut ranks = u32x4::splat(0);
+
+        let hex = pos / 32;
+
+        let idx = hex * 8;
+
+        let inner_counts = C::count_mid(&self.seq[idx..idx + 8].try_into().unwrap(), pos % 64);
+
+        use std::mem::transmute as t;
+        let sign = (pos as u32 % 64).wrapping_sub(32);
+        ranks += unsafe { t::<_, u32x4>(_mm_sign_epi32(t(inner_counts), t(u32x4::splat(sign)))) };
+
+        let self_ranks = u32x4::from_array(self.ranks);
+        static SHUFFLE: [u32; 8] = [16, 16, 8, 8, 0, 0, 0, 0];
+        ranks += u32x4::from_array(self.ranks) >> 16;
+        ranks += ((self_ranks & u32x4::splat(0xffff)) >> SHUFFLE[hex]) & u32x4::splat(0xff);
+        ranks.to_array()
+    }
+}
+
+// New: 18bit value towards the **middle** of the entire block
+// Then 7bit delta (up to 64) to left and right quarter
+// New: shuffle lookup table via shift.
+// TODO: Investigate if 6bit delta is enough if we block 1 position.
+#[repr(align(64))]
+#[derive(mem_dbg::MemSize)]
+pub struct HexaBlockMid3 {
+    /// high half: 18bit counts for the global offset to position 32 (middle of first u128).
+    /// low half: 2x 7bit counts for the first half of 2nd and 3rd 128 parts.
+    ranks: [u32; 4],
+    // u128x3 = u8x48 = 384 bit packed sequence
+    seq: [u8; 48],
+}
+
+impl BasicBlock for HexaBlockMid3 {
+    const B: usize = 48;
+    const N: usize = 192;
+    const C: usize = 8;
+    const W: usize = 18;
+
+    fn new(mut ranks: Ranks, data: &[u8; Self::B]) -> Self {
+        // Counts before each u64 block.
+        let mut bs = [[0u32; 4]; 6];
+        // count each part half.
+        for (i, chunk) in data.as_chunks::<8>().0.iter().enumerate() {
+            bs[i] = add(bs[i], count4_u8x8(*chunk));
+        }
+        // global ranks are to the middle
+        ranks = add(add(ranks, bs[0]), add(bs[1], bs[2]));
+        let p1 = add(bs[1], bs[2]);
+        let p2 = add(bs[3], bs[4]);
+        let part_ranks: Ranks = from_fn(|c| (p2[c] << 7) | p1[c]);
+        Self {
+            ranks: from_fn(|c| (ranks[c] << 14) | part_ranks[c]),
+            seq: *data,
+        }
+    }
+
+    #[inline(always)]
+    fn count<C: CountFn<8>, const C3: bool>(&self, pos: usize) -> Ranks {
+        assert!(!C3);
+        assert!(C::S == 0);
+        let mut ranks = u32x4::splat(0);
+
+        let hex = pos / 32;
+
+        let idx = hex * 8;
+
+        let inner_counts = C::count_mid(&self.seq[idx..idx + 8].try_into().unwrap(), pos % 64);
+
+        use std::mem::transmute as t;
+        let sign = (pos as u32 % 64).wrapping_sub(32);
+        ranks += unsafe { t::<_, u32x4>(_mm_sign_epi32(t(inner_counts), t(u32x4::splat(sign)))) };
+
+        let self_ranks = u32x4::from_array(self.ranks);
+        ranks += self_ranks >> 14;
+
+        let shuffle = 0x770000u32;
+        let parts = self_ranks & u32x4::splat(0x3fff);
+        let sign2 = (hex / 2).wrapping_sub(1);
+        let shift = (shuffle >> hex) & 7;
+        ranks += unsafe {
+            t::<_, u32x4>(_mm_sign_epi32(
+                t((parts >> shift) & u32x4::splat(0x7f)),
+                t(u32x4::splat(sign2 as u32)),
+            ))
+        };
+        ranks.to_array()
+    }
+}
+
+// New: shuffle lookup table via SIMD shift
+// TODO: Investigate if 6bit delta is enough if we block 1 position.
+#[repr(align(64))]
+#[derive(mem_dbg::MemSize)]
+pub struct HexaBlockMid4 {
+    /// high half: 18bit counts for the global offset to position 32 (middle of first u128).
+    /// low half: 2x 7bit counts for the first half of 2nd and 3rd 128 parts.
+    ranks: [u32; 4],
+    // u128x3 = u8x48 = 384 bit packed sequence
+    seq: [u8; 48],
+}
+
+impl BasicBlock for HexaBlockMid4 {
+    const B: usize = 48;
+    const N: usize = 192;
+    const C: usize = 8;
+    const W: usize = 18;
+
+    fn new(mut ranks: Ranks, data: &[u8; Self::B]) -> Self {
+        // Counts before each u64 block.
+        let mut bs = [[0u32; 4]; 6];
+        // count each part half.
+        for (i, chunk) in data.as_chunks::<8>().0.iter().enumerate() {
+            bs[i] = add(bs[i], count4_u8x8(*chunk));
+        }
+        // global ranks are to the middle
+        ranks = add(add(ranks, bs[0]), add(bs[1], bs[2]));
+        let p1 = add(bs[1], bs[2]);
+        let p2 = add(bs[3], bs[4]);
+        let part_ranks: Ranks = from_fn(|c| (p2[c] << 7) | p1[c]);
+        Self {
+            ranks: from_fn(|c| (ranks[c] << 14) | part_ranks[c]),
+            seq: *data,
+        }
+    }
+
+    #[inline(always)]
+    fn count<C: CountFn<8>, const C3: bool>(&self, pos: usize) -> Ranks {
+        assert!(!C3);
+        assert!(C::S == 0);
+        let mut ranks = u32x4::splat(0);
+
+        let hex = pos / 32;
+
+        let idx = hex * 8;
+
+        let inner_counts = C::count_mid(&self.seq[idx..idx + 8].try_into().unwrap(), pos % 64);
+
+        use std::mem::transmute as t;
+        let sign = (pos as u32 % 64).wrapping_sub(32);
+        ranks += unsafe { t::<_, u32x4>(_mm_sign_epi32(t(inner_counts), t(u32x4::splat(sign)))) };
+
+        let self_ranks = u32x4::from_array(self.ranks);
+        ranks += self_ranks >> 14;
+
+        let shuffle = u32x4::splat(0x770000u32);
+        let shift = (shuffle >> hex as u32) & u32x4::splat(7);
+
+        let parts = self_ranks & u32x4::splat(0x3fff);
+        let sign2 = (hex / 2).wrapping_sub(1);
+        ranks += unsafe {
+            t::<_, u32x4>(_mm_sign_epi32(
+                t((parts >> shift) & u32x4::splat(0x7f)),
+                t(u32x4::splat(sign2 as u32)),
+            ))
+        };
+        ranks.to_array()
     }
 }
