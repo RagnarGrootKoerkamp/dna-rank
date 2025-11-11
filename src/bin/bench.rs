@@ -320,23 +320,25 @@ fn bench_all(seq: &[u8], queries: &QS) {
 struct Args {
     #[clap(short = 'j', long, default_value_t = 6)]
     threads: usize,
-    #[clap(short = 'n', default_value_t = 1_000_000_000)]
-    n: usize,
+    #[clap(short = 'n')]
+    n: Option<usize>,
 }
 
 fn main() {
     #[cfg(debug_assertions)]
     let q = 10_000;
     #[cfg(debug_assertions)]
-    let ns = [100_000];
+    let mut ns = vec![100_000];
     #[cfg(not(debug_assertions))]
     let q = 10_000_000;
     #[cfg(not(debug_assertions))]
-    let ns = [100_000, 1_000_000_000];
+    let mut ns = vec![100_000, 1_000_000_000];
 
     let args = Args::parse();
     let threads = args.threads;
-    // let n = args.n;
+    if let Some(n) = args.n {
+        ns = vec![n];
+    }
 
     for n in ns {
         // for n in [100_000] {
