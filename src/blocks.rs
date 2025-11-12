@@ -1099,13 +1099,13 @@ impl BasicBlock for HexaBlockMid4 {
 
         let self_ranks = self.ranks[c as usize];
 
-        rank += self_ranks >> 14;
+        rank = rank.wrapping_add(self_ranks >> 14);
 
         let shuffle = 0x770000u32;
         let shift = (shuffle >> hex as u32) & 7;
         let parts = self_ranks & 0x3fff;
         let sign2 = (hex / 2).wrapping_sub(1);
-        rank += (((parts) >> shift) & 0x7f) * sign2 as u32;
+        rank = rank.wrapping_add((((parts) >> shift) & 0x7f).wrapping_mul(sign2 as u32));
         rank
     }
 }
