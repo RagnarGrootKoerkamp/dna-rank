@@ -1,4 +1,4 @@
-# DnaRank
+# QuadRank
 
 This is a work-in-progress implementation of a fast data structure for /rank/
 queries over a 2-bit DNA alphabet.

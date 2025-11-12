@@ -8,7 +8,7 @@ use std::{
 };
 
 use clap::Parser;
-use dna_rank::{
+use quadrank::{
     Ranks,
     blocks::{
         FullBlock, FullBlockMid, HexaBlock, HexaBlock2, HexaBlockMid, HexaBlockMid2, HexaBlockMid3,
