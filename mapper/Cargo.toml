@@ -1,0 +1,13 @@
+[package]
+name = "mapper"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+caps-sa-rs = { git = "https://github.com/imartayan/caps-sa-rs.git" }
+simple-saca = { path = "../../forks/simple-saca" }
+clap = { version = "4.5.51", features = ["derive"] }
+needletail = "0.6.3"
+small-bwt = "0.2.0"
+rayon = "1.11.0"
+quadrank = { version = "0.1.0", path = ".." }
