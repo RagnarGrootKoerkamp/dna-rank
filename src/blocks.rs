@@ -4,7 +4,7 @@ use std::{arch::x86_64::_mm_sign_epi32, array::from_fn, simd::u32x4};
 
 use crate::{
     Ranks, add,
-    count::{count_u8x8, count_u8x16, count_u64, count_u64_2, count_u64_2_mask},
+    count::{count_u8x8, count_u8x16, count_u64, count_u64_2_mask},
     count4::{CountFn, MASKS, count4_u8x8},
     ranker::BasicBlock,
 };
