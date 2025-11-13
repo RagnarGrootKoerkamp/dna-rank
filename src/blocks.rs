@@ -4,8 +4,8 @@ use std::{arch::x86_64::_mm_sign_epi32, array::from_fn, simd::u32x4};
 
 use crate::{
     Ranks, add,
-    count::{count_u8x8, count_u8x16, count_u64, count_u64_2_mask},
-    count4::{CountFn, MASKS, count4_u8x8},
+    count::{count_u8x8, count_u8x16, count_u64, count_u64_2, count_u64_mask, count_u64_mid_mask},
+    count4::{CountFn, MASKS, SimdCount10, WideSimdCount2, count4_u8x8},
     ranker::BasicBlock,
 };
 
@@ -401,20 +401,22 @@ impl BasicBlock for QuartBlock {
         let quart_pos = pos % 32;
 
         let idx = quart * 8;
-        let inner_counts = C::count(&self.seq[idx..idx + 8].try_into().unwrap(), quart_pos);
+        let chunk = &self.seq[idx..idx + 8].try_into().unwrap();
+        let inner_counts = C::count(chunk, quart_pos);
         for c in 0..4 {
             ranks[c] += inner_counts[c];
         }
 
-        if C3 {
-            ranks[0] = quart_pos as u32 - ranks[1] - ranks[2] - ranks[3];
-        } else {
-            ranks[0] -= extra_counted::<_, C>(pos);
-        }
+        // if C3 {
+        //     ranks[0] = quart_pos as u32 - ranks[1] - ranks[2] - ranks[3];
+        // } else {
+        //     ranks[0] -= extra_counted::<_, C>(pos);
+        // }
 
         for c in 0..4 {
             ranks[c] += self.ranks[c];
         }
+
         for c in 0..4 {
             ranks[c] += (self.part_ranks[c] >> (quart * 8)) & 0xff;
         }
@@ -429,9 +431,7 @@ impl BasicBlock for QuartBlock {
         let quart_pos = pos % 32;
         let idx = quart * 8;
         let mut chunk = u64::from_le_bytes(self.seq[idx..idx + 8].try_into().unwrap());
-        let mask = MASKS[quart_pos];
-        chunk &= mask;
-        let inner_count = count_u64(chunk, c);
+        let inner_count = count_u64_mask(chunk, c, quart_pos);
         rank += inner_count;
         rank += (self.part_ranks[c as usize] >> (quart * 8)) & 0xff;
         rank += self.ranks[c as usize];
@@ -724,6 +724,11 @@ impl BasicBlock for HexaBlock2 {
         }
 
         ranks
+    }
+
+    #[inline(always)]
+    fn count1(&self, pos: usize, c: u8) -> u32 {
+        self.count::<WideSimdCount2, false>(pos)[c as usize]
     }
 }
 
@@ -1090,7 +1095,7 @@ impl BasicBlock for HexaBlockMid4 {
         let idx = hex * 8;
 
         let word = u64::from_le_bytes(self.seq[idx..idx + 8].try_into().unwrap());
-        let inner = count_u64_2_mask(word, c, pos % 64);
+        let inner = count_u64_mid_mask(word, c, pos % 64);
 
         let mut rank = if (pos & 32) > 0 {
             inner

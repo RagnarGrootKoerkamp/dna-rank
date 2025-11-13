@@ -2,7 +2,7 @@
 
 use std::array::from_fn;
 
-use crate::count4::MID_MASKS;
+use crate::count4::{MASKS, MID_MASKS};
 
 #[inline(always)]
 pub fn count_u8x8(word: &[u8; 8], c: u8) -> u32 {
@@ -62,7 +62,21 @@ pub fn count_u64_2(word: u64, c: u8) -> u32 {
 }
 
 #[inline(always)]
-pub fn count_u64_2_mask(word: u64, c: u8, pos: usize) -> u32 {
+pub fn count_u64_mask(word: u64, c: u8, pos: usize) -> u32 {
+    // c = 00, 01, 10, 11 = cc
+    // scatter = |01|01|01|...
+    let scatter = 0x5555555555555555u64;
+    let masks: [u64; 4] = from_fn(|c| (c ^ 3) as u64 * scatter);
+    // should be |11|11|... to match c.
+    let mut tmp = word ^ masks[c as usize];
+    tmp &= MASKS[pos];
+    // |11| when c
+    let union = (tmp & (tmp >> 1)) & scatter;
+    union.count_ones()
+}
+
+#[inline(always)]
+pub fn count_u64_mid_mask(word: u64, c: u8, pos: usize) -> u32 {
     // c = 00, 01, 10, 11 = cc
     // scatter = |01|01|01|...
     let scatter = 0x5555555555555555u64;
