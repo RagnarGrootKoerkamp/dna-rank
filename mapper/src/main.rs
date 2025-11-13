@@ -28,21 +28,39 @@ struct Args {
     reads: PathBuf,
 }
 
-fn build_bwt(mut text: Vec<u8>) -> bwt::BWT {
+fn build_bwt_ascii(mut text: Vec<u8>) -> bwt::BWT {
     // Map to 0123.
     for x in &mut text {
         *x = (*x >> 1) & 3;
     }
 
-    // Caps-sa construction
+    build_bwt_packed(&mut text)
+}
 
-    if text.len() > 10000 {
+fn build_bwt_packed(text: &mut Vec<u8>) -> bwt::BWT {
+    if text.len() > 1000 {
         // time("simple-saca", || bwt::simple_saca(&text))
         // time("small-bwt", || bwt::small_bwt(&text))
-        time("caps-sa", || bwt::caps_sa(&text, false))
+        let b1 = time("caps-sa", || bwt::caps_sa(text, false));
+        let b2 = time("manual", || bwt::manual(&text));
+        if b1 != b2 {
+            eprintln!("BWT mismatch!");
+            eprintln!("Sentinels: b1 {}, b2 {}", b1.sentinel, b2.sentinel);
+            eprintln!("Lens: b1 {}, b2 {}", b1.bwt.len(), b2.bwt.len());
+            for (i, (&c1, &c2)) in b1.bwt.iter().zip(b2.bwt.iter()).enumerate() {
+                if c1 != c2 {
+                    eprintln!("Mismatch at pos {}: b1 {}, b2 {}", i, c1, c2);
+                    break;
+                }
+            }
+            assert_eq!(b1.bwt, b2.bwt, "BWT mismatch on text len {}", text.len());
+        }
+        b1
     } else {
-        eprintln!("text: {text:?}");
+        // eprintln!("text: {text:?}");
         time("manual", || bwt::manual(&text))
+        // eprintln!("text len {}, using caps-sa", text.len());
+        // time("caps-sa", || bwt::caps_sa(&text, false))
     }
 }
 
@@ -53,7 +71,7 @@ fn bwt(input: &Path, output: &Path) {
         let record = record.unwrap();
         text.extend_from_slice(&record.seq());
     }
-    let bwt = build_bwt(text);
+    let bwt = build_bwt_ascii(text);
 
     // write output to path.bwt:
     std::fs::write(
@@ -187,7 +205,7 @@ fn map_fm_crate(input_path: &Path, reads_path: &Path) {
         let mut m = 0;
         let mut mp = 0;
         for q in batch {
-            let matches = fm.search(&batch[0]).count();
+            let matches = fm.search(q).count();
             // s += steps;
             m += matches;
             if matches > 0 {
@@ -276,7 +294,8 @@ fn map_genedex(input_path: &Path, reads_path: &Path) {
         let s = 0;
         let mut m = 0;
         let mut mp = 0;
-        for matches in  fm.count_many(batch) {
+
+        for matches in fm.count_many(batch){
             // s += steps;
             m += matches;
             if matches > 0 {
@@ -326,7 +345,7 @@ fn map_genedex(input_path: &Path, reads_path: &Path) {
 fn test() {
     let text = b"GCATACGTACGAAAAAAGCTTG";
     println!("build bwt");
-    let bwt = build_bwt(text.to_vec());
+    let bwt = build_bwt_ascii(text.to_vec());
     println!("build fm");
     let fm = fm::FM::new(&bwt);
     println!("query");
@@ -361,7 +380,7 @@ fn broken() {
     // let query = b"TGCGACAGAATGGATCAGAAAGCTTGAAAACTTAGAGCAAAAAATTGACTATTTTGACGAGTGTCTTCTTCC";
     let text = b"AGCCTTAGCTGCGACAGAATGGATCAGAAAGCTTGAAAACTTAGAGCAAAAAATTGACTATTTTGACGAGTGTCTTCTTCCAGGCATTTTCACCATCGACGCGGATCCTCCAGACGAGTTGTTTCTTGATGAACTG";
     let query = b"GGA";
-    let bwt = build_bwt(text.to_vec());
+    let bwt = build_bwt_ascii(text.to_vec());
     let packed = query.iter().map(|&x| (x >> 1) & 3).collect::<Vec<_>>();
     let fm = fm::FM::new(&bwt);
     let (steps, count) = fm.query(&packed);

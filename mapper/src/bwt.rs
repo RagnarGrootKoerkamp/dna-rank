@@ -52,10 +52,23 @@ pub fn simple_saca(text: &[u8]) -> BWT {
 }
 
 /// Needs external memory for human genome; 2x slower.
-pub fn caps_sa(text: &[u8], ext: bool) -> BWT {
+/// Temporarily padds the input text with a sentinel character.
+pub fn caps_sa(text: &mut Vec<u8>, ext: bool) -> BWT {
+    for x in text.iter_mut() {
+        *x += 1;
+    }
+    text.push(0);
     let mut sa = Vec::with_capacity(text.len());
     caps_sa_rs::build_sa_u8(text, &mut sa, ext);
 
+    text.pop();
+    for x in text.iter_mut() {
+        *x -= 1;
+    }
+
+    // drop the sentinel index.
+    let n = text.len();
+    sa = sa.into_iter().filter(|&i| i != n as u32).collect();
     sa_to_bwt(text, sa.iter().map(|&i| i as usize))
 }
 
