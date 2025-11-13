@@ -870,7 +870,8 @@ impl BasicBlock for HexaBlockMid {
         }
 
         for c in 0..4 {
-            ranks[c] += (self.ranks[c] & 0xffff) >> (16 - 8 * (hex / 2) as u32) & 0xff;
+            ranks[c] = ranks[c]
+                .wrapping_add(((self.ranks[c] & 0xffff) >> (16 - 8 * (hex / 2) as u32)) & 0xff);
         }
         ranks
 
@@ -973,7 +974,7 @@ impl BasicBlock for HexaBlockMid3 {
         ranks = add(add(ranks, bs[0]), add(bs[1], bs[2]));
         let p1 = add(bs[1], bs[2]);
         let p2 = add(bs[3], bs[4]);
-        let part_ranks: Ranks = from_fn(|c| (p2[c] << 7) | p1[c]);
+        let part_ranks: Ranks = from_fn(|c| (p1[c] << 7) | p2[c]);
         Self {
             ranks: from_fn(|c| (ranks[c] << 14) | part_ranks[c]),
             seq: *data,
@@ -999,10 +1000,10 @@ impl BasicBlock for HexaBlockMid3 {
         let self_ranks = u32x4::from_array(self.ranks);
         ranks += self_ranks >> 14;
 
-        let shuffle = 0x770000u32;
+        let shuffle = 0x000707u64;
         let parts = self_ranks & u32x4::splat(0x3fff);
         let sign2 = (hex / 2).wrapping_sub(1);
-        let shift = (shuffle >> hex) & 7;
+        let shift = ((shuffle >> idx) & 7) as u32;
         ranks += unsafe {
             t::<_, u32x4>(_mm_sign_epi32(
                 t((parts >> shift) & u32x4::splat(0x7f)),
@@ -1042,7 +1043,7 @@ impl BasicBlock for HexaBlockMid4 {
         ranks = add(add(ranks, bs[0]), add(bs[1], bs[2]));
         let p1 = add(bs[1], bs[2]);
         let p2 = add(bs[3], bs[4]);
-        let part_ranks: Ranks = from_fn(|c| (p2[c] << 7) | p1[c]);
+        let part_ranks: Ranks = from_fn(|c| (p1[c] << 7) | p2[c]);
         Self {
             ranks: from_fn(|c| (ranks[c] << 14) | part_ranks[c]),
             seq: *data,
@@ -1068,8 +1069,8 @@ impl BasicBlock for HexaBlockMid4 {
         let self_ranks = u32x4::from_array(self.ranks);
         ranks += self_ranks >> 14;
 
-        let shuffle = u32x4::splat(0x770000u32);
-        let shift = (shuffle >> hex as u32) & u32x4::splat(7);
+        let shuffle = u32x4::splat(0x000077u32);
+        let shift = (shuffle >> (4 * hex) as u32) & u32x4::splat(7);
 
         let parts = self_ranks & u32x4::splat(0x3fff);
         let sign2 = (hex / 2).wrapping_sub(1);
@@ -1101,8 +1102,8 @@ impl BasicBlock for HexaBlockMid4 {
 
         rank = rank.wrapping_add(self_ranks >> 14);
 
-        let shuffle = 0x770000u32;
-        let shift = (shuffle >> hex as u32) & 7;
+        let shuffle = 0x000077u32;
+        let shift = (shuffle >> (4 * hex) as u32) & 7;
         let parts = self_ranks & 0x3fff;
         let sign2 = (hex / 2).wrapping_sub(1);
         rank = rank.wrapping_add((((parts) >> shift) & 0x7f).wrapping_mul(sign2 as u32));
