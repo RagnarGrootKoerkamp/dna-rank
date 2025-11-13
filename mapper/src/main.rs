@@ -494,8 +494,8 @@ fn main() {
         bwt(&args.reference, bwt_path);
     }
 
-    // map(bwt_path, &args.reads);
-    map_awry(&args.reference, &args.reads);
+    map(bwt_path, &args.reads);
+    // map_awry(&args.reference, &args.reads);
     // map_fm_crate(&args.reference, &args.reads);
     // map_genedex::<FlatTextWithRankSupport<i32, Block64>>(&args.reference, &args.reads);
     // map_genedex::<CondensedTextWithRankSupport<i32, Block64>>(&args.reference, &args.reads);
