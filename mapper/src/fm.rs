@@ -53,10 +53,14 @@ impl FM {
         for &c in text.iter().rev() {
             steps += 1;
             let occ = self.occ[c as usize];
-            let ranks_s = self.rank.count(s as usize - (s > self.sentinel) as usize);
-            s = occ + ranks_s[c as usize] as usize;
-            let ranks_t = self.rank.count(t as usize - (t > self.sentinel) as usize);
-            t = occ + ranks_t[c as usize] as usize;
+            let ranks_s = self
+                .rank
+                .count1(s as usize - (s > self.sentinel) as usize, c);
+            s = occ + ranks_s as usize;
+            let ranks_t = self
+                .rank
+                .count1(t as usize - (t > self.sentinel) as usize, c);
+            t = occ + ranks_t as usize;
             if s == t {
                 return (steps, 0);
             }
@@ -100,12 +104,12 @@ impl FM {
                 let occ = self.occ[c as usize];
                 let ranks_s = self
                     .rank
-                    .count(s[i] as usize - (s[i] > self.sentinel) as usize);
-                s[i] = occ + ranks_s[c as usize] as usize;
+                    .count1(s[i] as usize - (s[i] > self.sentinel) as usize, c);
+                s[i] = occ + ranks_s as usize;
                 let ranks_t = self
                     .rank
-                    .count(t[i] as usize - (t[i] > self.sentinel) as usize);
-                t[i] = occ + ranks_t[c as usize] as usize;
+                    .count1(t[i] as usize - (t[i] > self.sentinel) as usize, c);
+                t[i] = occ + ranks_t as usize;
             }
             idx += 1;
         }

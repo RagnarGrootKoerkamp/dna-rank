@@ -163,7 +163,13 @@ where
     fn count1(&self, pos: usize, c: u8) -> u32 {
         let block_idx = pos / BB::N;
         let block_pos = pos % BB::N;
-        self.blocks[block_idx].count1(block_pos, c)
+        let mut rank = self.blocks[block_idx].count1(block_pos, c);
+        if BB::W < 32 {
+            let long_pos = block_idx / Self::LONG_STRIDE;
+            let long_ranks = self.super_blocks[long_pos / SB::BB].get(long_pos % SB::BB);
+            rank += long_ranks[c as usize];
+        }
+        rank
     }
 }
 impl<BB: BasicBlock, SB: SuperBlock, CF: CountFn<{ BB::C }>, const C3: bool> Ranker<BB, SB, CF, C3>
