@@ -24,10 +24,10 @@ for i, row in data.iterrows():
     plt.semilogy(
         row["size"],
         row["speed"],
-        marker="o" if row["lookup"] == 0 else "s",
-        ms=12 if row["lookup"] == 0 else 10,
+        marker="o" if row["lookup"] == 0 else "*",
+        ms=12 if row["lookup"] == 0 else 8,
         linestyle="None",
-        label=row["name"],
+        # label=row["name"],
         color=row["color"],
         base=2,
     )
@@ -43,9 +43,17 @@ plt.axvline(x=2.0, color="red", linestyle="-", linewidth=1)
 
 plt.xlabel("Size (bits/bp)")
 plt.ylabel("Speed (M reads/s)")
-plt.title("FM-index exact read mapping size and throughput")
+plt.title("FM-index exact read mapping size and count() throughput")
 plt.grid(True, which="both", ls="--")
 for i, row in data.iterrows():
     plt.text(row["size"] + 0.2, row["speed"] / 1.05, row["name"])
+
+# Manually add legend handle for the star markers
+plt.plot(
+    [], [], marker="*", ms=8, linestyle="None", label="prefix lookup", color="black"
+)
+plt.legend(loc="upper left")
+
+
 plt.savefig("comparison.png", bbox_inches="tight", dpi=300)
 # plt.show()
