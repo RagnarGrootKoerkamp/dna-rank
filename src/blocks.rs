@@ -4,8 +4,8 @@ use std::{arch::x86_64::_mm_sign_epi32, array::from_fn, simd::u32x4};
 
 use crate::{
     Ranks, add,
-    count::{count_u8x8, count_u8x16, count_u64, count_u64_2, count_u64_mask, count_u64_mid_mask},
-    count4::{CountFn, MASKS, SimdCount10, WideSimdCount2, count4_u8x8},
+    count::{count_u8x8, count_u8x16, count_u64_mask, count_u64_mid_mask},
+    count4::{CountFn, WideSimdCount2, count4_u8x8},
     ranker::BasicBlock,
 };
 
@@ -430,7 +430,7 @@ impl BasicBlock for QuartBlock {
         let quart = pos / 32;
         let quart_pos = pos % 32;
         let idx = quart * 8;
-        let mut chunk = u64::from_le_bytes(self.seq[idx..idx + 8].try_into().unwrap());
+        let chunk = u64::from_le_bytes(self.seq[idx..idx + 8].try_into().unwrap());
         let inner_count = count_u64_mask(chunk, c, quart_pos);
         rank += inner_count;
         rank += (self.part_ranks[c as usize] >> (quart * 8)) & 0xff;

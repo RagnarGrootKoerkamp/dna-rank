@@ -1,4 +1,4 @@
-// #![allow(unused)]
+#![allow(unused)]
 #![allow(incomplete_features)]
 #![feature(generic_const_exprs)]
 
