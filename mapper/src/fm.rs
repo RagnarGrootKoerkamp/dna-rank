@@ -63,4 +63,48 @@ impl FM {
         }
         (steps, (t - s) as usize)
     }
+
+    pub fn query_batch<const B: usize>(&self, text: &[Vec<u8>; B]) -> [(usize, usize); B] {
+        let mut s = [0; B];
+        let mut t = [self.n + 1; B];
+        let mut steps = [0; B];
+
+        let mut alive = true;
+        let mut idx = 0;
+        while alive {
+            alive = false;
+
+            for i in 0..B {
+                if s[i] == t[i] || idx >= text[i].len() {
+                    continue;
+                }
+                self.rank
+                    .prefetch(s[i] as usize - (s[i] > self.sentinel) as usize);
+                self.rank
+                    .prefetch(t[i] as usize - (t[i] > self.sentinel) as usize);
+            }
+
+            for i in 0..B {
+                if s[i] == t[i] || idx >= text[i].len() {
+                    continue;
+                }
+                alive = true;
+
+                let c = text[i][text[i].len() - 1 - idx];
+
+                steps[i] += 1;
+                let occ = self.occ[c as usize];
+                let ranks_s = self
+                    .rank
+                    .count(s[i] as usize - (s[i] > self.sentinel) as usize);
+                s[i] = occ + ranks_s[c as usize] as usize;
+                let ranks_t = self
+                    .rank
+                    .count(t[i] as usize - (t[i] > self.sentinel) as usize);
+                t[i] = occ + ranks_t[c as usize] as usize;
+            }
+            idx += 1;
+        }
+        std::array::from_fn(|i| (steps[i], (t[i] - s[i]) as usize))
+    }
 }

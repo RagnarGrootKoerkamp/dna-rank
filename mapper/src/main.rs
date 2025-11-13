@@ -68,15 +68,33 @@ fn map(bwt_path: &Path, reads_path: &Path) {
     let mut total_matches = 0;
     let mut total_steps = 0;
     let start = std::time::Instant::now();
-    while let Some(record) = reader.next() {
-        let record = record.unwrap();
-        let seq = record.seq();
-        // eprintln!("seq: {}", std::str::from_utf8(&seq).unwrap());
-        let packed = seq.iter().map(|&x| (x >> 1) & 3).collect::<Vec<_>>();
-        let packed_rc = packed.iter().rev().map(|&x| x ^ 2).collect::<Vec<_>>();
+    'l: loop {
+        let mut batch = vec![];
+        while batch.len() < 32 {
+            let Some(record) = reader.next() else {
+                break 'l;
+            };
+            let record = record.unwrap();
+            let seq = record.seq();
+            // eprintln!("seq: {}", std::str::from_utf8(&seq).unwrap());
+            let packed = seq.iter().map(|&x| (x >> 1) & 3).collect::<Vec<_>>();
+            let packed_rc = packed.iter().rev().map(|&x| x ^ 2).collect::<Vec<_>>();
 
-        for q in [packed, packed_rc] {
-            let (steps, matches) = fm.query(&q);
+            // for q in [packed, packed_rc] {
+            //     let (steps, matches) = fm.query(&q);
+            //     // eprintln!("  steps: {}, matches: {}", steps, matches);
+            //     total += 1;
+            //     total_steps += steps;
+            //     total_matches += matches;
+            //     if matches > 0 {
+            //         mapped += 1;
+            //     }
+            // }
+            batch.push(packed);
+            batch.push(packed_rc);
+        }
+
+        for (steps, matches) in fm.query_batch::<32>(&batch.try_into().unwrap()) {
             // eprintln!("  steps: {}, matches: {}", steps, matches);
             total += 1;
             total_steps += steps;

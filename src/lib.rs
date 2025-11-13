@@ -27,6 +27,8 @@ fn add(a: Ranks, b: Ranks) -> Ranks {
     from_fn(|c| a[c] + b[c])
 }
 
+// TODO: investigate different bitpacking layouts, like QWT does
+
 #[test]
 fn test() {
     use ranker::RankerT;
