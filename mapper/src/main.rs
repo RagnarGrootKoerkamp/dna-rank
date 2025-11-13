@@ -99,6 +99,9 @@ fn map(bwt_path: &Path, reads_path: &Path) {
                 total_steps as f64 / duration.as_secs_f64()
             );
         }
+        if total % (1024 * 1024) == 0 {
+            eprintln!();
+        }
     }
     eprintln!();
     println!("{:<15} {}", "#reads:", total);
