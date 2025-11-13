@@ -54,13 +54,19 @@ fn bwt(input: &Path, output: &Path) {
     let bwt = build_bwt(text);
 
     // write output to path.bwt:
-    std::fs::write(output, serde_json::to_string(&bwt).unwrap()).unwrap();
+    std::fs::write(
+        output,
+        bincode::encode_to_vec(&bwt, bincode::config::legacy()).unwrap(),
+    )
+    .unwrap();
 }
 
 fn map(bwt_path: &Path, reads_path: &Path) {
     eprintln!("Reading BWT from {}", bwt_path.display());
     let bwt = std::fs::read(bwt_path).unwrap();
-    let bwt = serde_json::from_slice(&bwt).unwrap();
+    let bwt = bincode::decode_from_slice(&bwt, bincode::config::legacy())
+        .unwrap()
+        .0;
     eprintln!("Building FM index & rank structure");
     let fm = time("FM build", || fm::FM::new(&bwt));
 
