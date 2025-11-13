@@ -577,6 +577,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "fm-index"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "29f414f92b6c5fbe90f2b2861482bfd75fd5452dcb80ca23d5f8fee05ad5bf15"
+dependencies = [
+ "num-traits",
+ "serde",
+ "vers-vecs",
+]
+
+[[package]]
 name = "fnv"
 version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -859,6 +870,7 @@ dependencies = [
  "bincode 2.0.1",
  "caps-sa-rs",
  "clap",
+ "fm-index",
  "needletail",
  "quadrank",
  "qwt",
@@ -1703,6 +1715,15 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.108",
+]
+
+[[package]]
+name = "vers-vecs"
+version = "1.8.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fa7c1eb620b01c34ce21dc3155fa17701166a9e3e68ab56c0f7cf4e668f4ddbe"
+dependencies = [
+ "serde",
 ]
 
 [[package]]

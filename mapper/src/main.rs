@@ -5,6 +5,7 @@ mod bwt;
 mod fm;
 
 use clap::Parser;
+use fm_index::Text;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use std::{
     path::{Path, PathBuf},
@@ -70,6 +71,7 @@ fn map(bwt_path: &Path, reads_path: &Path) {
     eprintln!("Building FM index & rank structure");
     let fm = time("FM build", || fm::FM::new(&bwt));
 
+    eprintln!("Reading queries");
     let mut reader = needletail::parse_fastx_file(reads_path).unwrap();
     let mut reads = vec![];
     while let Some(r) = reader.next() {
@@ -94,6 +96,98 @@ fn map(bwt_path: &Path, reads_path: &Path) {
         let mut mp = 0;
         for (steps, matches) in fm.query_batch(batch) {
             s += steps;
+            m += matches;
+            if matches > 0 {
+                mp += 1;
+            }
+        }
+        let ts = total_steps.fetch_add(s, std::sync::atomic::Ordering::Relaxed);
+        let t = total.fetch_add(batch.len(), std::sync::atomic::Ordering::Relaxed);
+        let mp = mapped.fetch_add(mp, std::sync::atomic::Ordering::Relaxed);
+        let m = total_matches.fetch_add(
+            m,
+            std::sync::atomic::Ordering::Relaxed,
+        );
+
+        if t % (1024 * 1024) == 0 {
+            let duration = start.elapsed();
+            eprint!(
+                "Processed {:>8} reads ({:>8.3} steps/read, {:>8} mapped, {:>8} matches) in {:5.2?} ({:>6.2} kreads/s, {:>6.2} Mbp/s)\n",
+                t,
+                ts as f64 / t as f64,
+                mp,
+                m,
+                duration,
+                t as f64 / duration.as_secs_f64() / 1e3,
+                ts as f64 / duration.as_secs_f64() / 1e6
+            );
+        }
+    });
+
+    let total = total.into_inner();
+    let mapped = mapped.into_inner();
+    let total_matches = total_matches.into_inner();
+    let total_steps = total_steps.into_inner();
+
+    eprintln!();
+    println!("{:<15} {}", "#reads:", total);
+    println!(
+        "{:<15} {:.2}",
+        "#steps/read:",
+        total_steps as f64 / total as f64
+    );
+    println!("{:<15} {}", "#mapped:", mapped);
+    println!("{:<15} {}", "#matches:", total_matches);
+}
+
+fn map_fm_crate(input_path: &Path, reads_path: &Path) {
+    eprintln!("Reading text from {}", input_path.display());
+    let mut text = vec![];
+    let mut reader = needletail::parse_fastx_file(input_path).unwrap();
+    while let Some(record) = reader.next() {
+        let record = record.unwrap();
+        text.extend_from_slice(&record.seq());
+    }
+    for x in &mut text {
+        *x = ((*x >> 1) & 3) + 1;
+    }
+    text.push(0);
+    eprintln!("Building FM index & rank structure");
+
+    let fm = time("FM build", || {
+        fm_index::FMIndex::<u8>::new(&fm_index::Text::with_max_character(text, 4)).unwrap()
+    });
+
+    eprintln!("Reading queries");
+    let mut reader = needletail::parse_fastx_file(reads_path).unwrap();
+    let mut reads = vec![];
+    while let Some(r) = reader.next() {
+        let r = r.unwrap();
+        let seq = r.seq();
+        // eprintln!("seq: {}", std::str::from_utf8(&seq).unwrap());
+        let packed = seq.iter().map(|&x| ((x >> 1) & 3) + 1).collect::<Vec<_>>();
+        let packed_rc = packed
+            .iter()
+            .rev()
+            .map(|&x| ((x - 1) ^ 2) + 1)
+            .collect::<Vec<_>>();
+        reads.push(packed);
+        reads.push(packed_rc);
+    }
+
+    let total = AtomicUsize::new(0);
+    let mapped = AtomicUsize::new(0);
+    let total_matches = AtomicUsize::new(0);
+    let total_steps = AtomicUsize::new(0);
+    let start = std::time::Instant::now();
+    const B: usize = 32;
+    reads.as_chunks::<B>().0.par_iter().for_each(|batch| {
+        let s = 0;
+        let mut m = 0;
+        let mut mp = 0;
+        for q in batch {
+            let matches = fm.search(&batch[0]).count();
+            // s += steps;
             m += matches;
             if matches > 0 {
                 mp += 1;
@@ -166,7 +260,8 @@ fn main() {
         bwt(&args.reference, bwt_path);
     }
 
-    map(bwt_path, &args.reads);
+    // map(bwt_path, &args.reads);
+    map_fm_crate(&args.reference, &args.reads);
 }
 
 #[test]
@@ -181,4 +276,24 @@ fn broken() {
     let (steps, count) = fm.query(&packed);
     eprintln!("steps: {steps}, matches: {count}");
     assert!(count > 0);
+}
+
+#[test]
+fn broken2() {
+    // let text = b"AGCCTTAGCTGCGACAGAATGGATCAGAAAGCTTGAAAACTTAGAGCAAAAAATTGACTATTTTGACGAGTGTCTTCTTCCAGGCATTTTCACCATCGACGCGGATCCTCCAGACGAGTTGTTTCTTGATGAACTG";
+    // let query = b"TGCGACAGAATGGATCAGAAAGCTTGAAAACTTAGAGCAAAAAATTGACTATTTTGACGAGTGTCTTCTTCC";
+    let text = b"AGCCTTAGCTGCGACAGAATGGATCAGAAAGCTTGAAAACTTAGAGCAAAAAATTGACTATTTTGACGAGTGTCTTCTTCCAGGCATTTTCACCATCGACGCGGATCCTCCAGACGAGTTGTTTCTTGATGAACTG";
+    let query = b"GGATCA";
+    let mut text = text.iter().map(|&x| ((x >> 1) & 3) + 1).collect::<Vec<_>>();
+    text.push(0);
+    let query = query
+        .iter()
+        .map(|&x| ((x >> 1) & 3) + 1)
+        .collect::<Vec<_>>();
+
+    let fm = fm_index::FMIndex::new(&Text::with_max_character(text, 4)).unwrap();
+    let count = fm.search(&query).count();
+    eprintln!("matches: {count}");
+    assert!(count > 0);
+    panic!()
 }

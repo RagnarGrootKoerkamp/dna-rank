@@ -12,4 +12,5 @@ small-bwt = "0.2.0"
 rayon = "1.11.0"
 quadrank = { version = "0.1.0", path = ".." }
 qwt = "0.3.1"
+fm-index = "0.3.0"
 bincode = "2.0.1"
